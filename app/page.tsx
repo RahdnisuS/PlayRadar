@@ -1,3 +1,4 @@
+import { Chat } from "@/components/Chat";
 import { GameCard } from "@/components/GameCard";
 import { getGameCards, type GameCard as Game } from "@/lib/catalog/queries";
 
@@ -16,9 +17,7 @@ export default async function Home() {
           Describe a mood, genre, budget or how long you&apos;ve got. PlayRadar picks five PC games from Steam and
           Epic, shows a spoiler-free video for each, and compares prices across both stores.
         </p>
-        <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted">
-          Chat assistant coming soon.
-        </div>
+        <Chat />
       </section>
       <Shelf title="Popular on Steam & Epic" games={popular} />
       <Shelf title="Most wishlisted upcoming" games={upcoming} />

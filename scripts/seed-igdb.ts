@@ -8,6 +8,7 @@ import {
   SOURCE_STEAM, SOURCE_EPIC, GAME_TYPES_BASE, STATUS_EARLY_ACCESS, STATUSES_SKIP,
   POP_STEAM_MOST_WISHLISTED_UPCOMING,
 } from "../lib/igdb/client";
+import { itadProvider } from "../lib/prices/itad";
 
 const arg = (name: string, def: number) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -49,11 +50,18 @@ const DETAIL_FIELDS = [
 const BASE_WHERE = `platforms = (6) & game_type = (${GAME_TYPES_BASE}) & game_status != (${STATUSES_SKIP})`;
 const STORE_WHERE = `external_games.external_game_source = (${SOURCE_STEAM},${SOURCE_EPIC})`;
 
+/** All candidate store ids. A game can have several Steam apps (e.g. a delisted original plus a re-release). */
 function storeIds(g: IgdbGame) {
-  const steam = g.external_games?.find((e) => e.external_game_source === SOURCE_STEAM && /^\d+$/.test(e.uid));
+  const steamAppIds = [...new Set((g.external_games ?? [])
+    .filter((e) => e.external_game_source === SOURCE_STEAM && /^\d+$/.test(e.uid))
+    .map((e) => e.uid))];
   const epic = g.external_games?.find((e) => e.external_game_source === SOURCE_EPIC && epicSlugFromUrl(e.url));
-  return { steamAppId: steam?.uid ?? null, epicSlug: epicSlugFromUrl(epic?.url) };
+  return { steamAppIds, epicSlug: epicSlugFromUrl(epic?.url) };
 }
+const hasStore = (g: IgdbGame) => {
+  const s = storeIds(g);
+  return s.steamAppIds.length > 0 || !!s.epicSlug;
+};
 
 async function fetchReleasedSince(since: number, target: number, skip: Set<number>): Promise<IgdbGame[]> {
   const now = Math.floor(Date.now() / 1000);
@@ -64,8 +72,7 @@ async function fetchReleasedSince(since: number, target: number, skip: Set<numbe
       ` & first_release_date >= ${since} & total_rating_count > 0; sort total_rating_count desc; limit 500; offset ${offset};`);
     if (page.length === 0) break;
     for (const g of page) {
-      const s = storeIds(g);
-      if ((s.steamAppId || s.epicSlug) && !skip.has(g.id)) out.push(g);
+      if (hasStore(g) && !skip.has(g.id)) out.push(g);
     }
   }
   return out.slice(0, target);
@@ -99,8 +106,7 @@ async function fetchUpcoming(): Promise<IgdbGame[]> {
     const now = Date.now() / 1000;
     for (const g of page) {
       const notOut = !g.first_release_date || g.first_release_date > now;
-      const s = storeIds(g);
-      if (notOut && g.game_status !== 0 && (s.steamAppId || s.epicSlug)) out.push(g);
+      if (notOut && g.game_status !== 0 && hasStore(g)) out.push(g);
     }
   }
   out.sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
@@ -135,13 +141,19 @@ async function upsertTag(client: import("pg").PoolClient, name: string, kind: st
   return rows[0].id as number;
 }
 
-async function save(games: { g: IgdbGame; status: string; popularity: number }[], playtimes: Map<number, number>) {
+async function save(
+  games: { g: IgdbGame; status: string; popularity: number }[],
+  playtimes: Map<number, number>,
+  stores: Map<number, Resolved | null>,
+) {
   const tagCache = new Map<string, number>();
   const [{ id: steamStore }] = await q(`SELECT id FROM stores WHERE code='steam'`);
   const [{ id: epicStore }] = await q(`SELECT id FROM stores WHERE code='epic'`);
   let n = 0;
   await tx(async (client) => {
     for (const { g, status, popularity } of games) {
+      const resolved = stores.get(g.id);
+      if (!resolved) continue; // duplicate of a more popular entry, or no usable store listing
       const modes = (g.game_modes ?? []).map((m) => m.name);
       const coopFlag = (g.multiplayer_modes ?? []).some((m) => m.campaigncoop || m.onlinecoop || m.offlinecoop || m.lancoop);
       const dev = g.involved_companies?.find((c) => c.developer)?.company.name ?? null;
@@ -149,9 +161,9 @@ async function save(games: { g: IgdbGame; status: string; popularity: number }[]
       const videos = (g.videos ?? []).map((v) => ({ id: v.video_id, name: v.name }));
       const { rows } = await client.query(
         `INSERT INTO games (igdb_id, slug, title, summary, release_date, release_status, cover_url, developer, publisher,
-                            avg_playtime_hrs, is_multiplayer, is_coop, popularity, external_ids, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
-         ON CONFLICT (igdb_id) DO UPDATE SET
+                            avg_playtime_hrs, is_multiplayer, is_coop, popularity, external_ids, itad_id, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now())
+         ON CONFLICT (igdb_id) DO UPDATE SET itad_id=EXCLUDED.itad_id,
            title=EXCLUDED.title, summary=EXCLUDED.summary, release_date=EXCLUDED.release_date,
            release_status=EXCLUDED.release_status, cover_url=EXCLUDED.cover_url, developer=EXCLUDED.developer,
            publisher=EXCLUDED.publisher, avg_playtime_hrs=EXCLUDED.avg_playtime_hrs,
@@ -167,6 +179,7 @@ async function save(games: { g: IgdbGame; status: string; popularity: number }[]
           modes.some((m) => COOP_MODES.has(m)) || coopFlag,
           popularity,
           JSON.stringify({ igdb_videos: videos }),
+          resolved.itadId,
         ]);
       const gameId = rows[0].id;
 
@@ -179,7 +192,7 @@ async function save(games: { g: IgdbGame; status: string; popularity: number }[]
         await client.query(`INSERT INTO game_tags (game_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [gameId, tagId]);
       }
 
-      const { steamAppId, epicSlug } = storeIds(g);
+      const { steamAppId, epicSlug } = resolved;
       if (steamAppId) {
         await client.query(
           `INSERT INTO store_listings (game_id, store_id, store_app_id, store_url, steam_app_link)
@@ -198,40 +211,76 @@ async function save(games: { g: IgdbGame; status: string; popularity: number }[]
   console.log(`  saved ${n} games`);
 }
 
-/** Maps our listings to IsThereAnyDeal game ids in bulk (one request per 200 store ids). */
-async function linkItad() {
-  const key = process.env.ITAD_API_KEY!;
-  const rows = await q<{ game_id: string; code: string; store_app_id: string }>(
-    `SELECT sl.game_id, s.code, sl.store_app_id FROM store_listings sl
-     JOIN stores s ON s.id = sl.store_id JOIN games g ON g.id = sl.game_id
-     WHERE g.itad_id IS NULL ORDER BY s.code DESC`); // steam first
-  const found = new Map<string, string>(); // game_id -> itad id
-  for (const [code, shopId, prefix] of [["steam", 61, "app/"], ["epic", 16, ""]] as const) {
-    const todo = rows.filter((r) => r.code === code && !found.has(r.game_id));
-    for (let i = 0; i < todo.length; i += 200) {
-      const chunk = todo.slice(i, i + 200);
-      const r = await fetch(`https://api.isthereanydeal.com/lookup/id/shop/${shopId}/v1?key=${key}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(chunk.map((c) => prefix + c.store_app_id)),
-      });
-      if (!r.ok) throw new Error(`ITAD lookup ${r.status}`);
-      const map: Record<string, string | null> = await r.json();
-      for (const c of chunk) {
-        const id = map[prefix + c.store_app_id];
-        if (id) found.set(c.game_id, id);
-      }
+/** Bulk store-id -> IsThereAnyDeal id lookup (200 ids per request). */
+async function itadLookup(shopId: number, keys: string[]): Promise<Record<string, string | null>> {
+  const out: Record<string, string | null> = {};
+  for (let i = 0; i < keys.length; i += 200) {
+    const r = await fetch(`https://api.isthereanydeal.com/lookup/id/shop/${shopId}/v1?key=${process.env.ITAD_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(keys.slice(i, i + 200)),
+    });
+    if (!r.ok) throw new Error(`ITAD lookup ${r.status}`);
+    Object.assign(out, await r.json());
+  }
+  return out;
+}
+
+type Resolved = { itadId: string | null; steamAppId: string | null; epicSlug: string | null };
+
+/**
+ * Picks one sellable product per IGDB game and drops duplicates:
+ *  - with several Steam apps, prefer the one whose ITAD game currently has a Steam/Epic price (IN or US),
+ *    then the newest (highest) appid — this skips delisted originals in favour of re-releases;
+ *  - an Epic slug is kept only if it maps to the same ITAD game (or ITAD doesn't know it);
+ *  - when two IGDB entries resolve to the same ITAD game, the more popular one wins and the other is skipped.
+ * Returns null for skipped duplicates.
+ */
+async function resolveStores(games: { g: IgdbGame; popularity: number }[]): Promise<Map<number, Resolved | null>> {
+  const ids = new Map(games.map(({ g }) => [g.id, storeIds(g)]));
+  const steamMap = await itadLookup(61, [...new Set([...ids.values()].flatMap((s) => s.steamAppIds.map((a) => `app/${a}`)))]);
+  const epicMap = await itadLookup(16, [...new Set([...ids.values()].flatMap((s) => (s.epicSlug ? [s.epicSlug] : [])))]);
+
+  const candidates = (igdbId: number) => {
+    const s = ids.get(igdbId)!;
+    const c = new Set<string>();
+    for (const a of s.steamAppIds) if (steamMap[`app/${a}`]) c.add(steamMap[`app/${a}`]!);
+    if (s.epicSlug && epicMap[s.epicSlug]) c.add(epicMap[s.epicSlug]!);
+    return [...c];
+  };
+  const ambiguous = [...new Set(games.flatMap(({ g }) => (candidates(g.id).length > 1 ? candidates(g.id) : [])))];
+  const sellable = new Set<string>();
+  for (const country of ["IN", "US"]) {
+    for (const quote of await itadProvider.getPrices(ambiguous, country)) sellable.add(quote.providerGameId);
+  }
+  console.log(`  ${ambiguous.length} candidate products for multi-listing games, ${sellable.size} on sale`);
+
+  const out = new Map<number, Resolved | null>();
+  const claimed = new Set<string>();
+  for (const { g } of [...games].sort((a, b) => b.popularity - a.popularity)) {
+    const s = ids.get(g.id)!;
+    const cands = candidates(g.id);
+    const appidFor = (itad: string) =>
+      s.steamAppIds.filter((a) => steamMap[`app/${a}`] === itad).sort((x, y) => Number(y) - Number(x))[0] ?? null;
+    let itadId: string | null = null;
+    if (cands.length === 1) itadId = cands[0];
+    else if (cands.length > 1) {
+      const ranked = [...cands].sort((x, y) =>
+        Number(sellable.has(y)) - Number(sellable.has(x)) || Number(appidFor(y) ?? 0) - Number(appidFor(x) ?? 0));
+      itadId = ranked[0];
     }
+    if (itadId && claimed.has(itadId)) {
+      out.set(g.id, null);
+      continue;
+    }
+    if (itadId) claimed.add(itadId);
+    const steamAppId = itadId
+      ? appidFor(itadId)
+      : [...s.steamAppIds].sort((x, y) => Number(y) - Number(x))[0] ?? null;
+    const epicSlug = s.epicSlug && (!epicMap[s.epicSlug] || epicMap[s.epicSlug] === itadId) ? s.epicSlug : null;
+    out.set(g.id, steamAppId || epicSlug ? { itadId, steamAppId, epicSlug } : null);
   }
-  // Two IGDB entries can map to the same ITAD game (editions); keep the more popular one.
-  let linked = 0;
-  for (const [gameId, itadId] of found) {
-    const res = await q(
-      `UPDATE games SET itad_id = $2 WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM games WHERE itad_id = $2) RETURNING id`,
-      [gameId, itadId]);
-    linked += res.length;
-  }
-  console.log(`  ITAD linked ${linked} of ${new Set(rows.map((r) => r.game_id)).size} unlinked games`);
+  return out;
 }
 
 async function main() {
@@ -255,10 +304,11 @@ async function main() {
   console.log("Fetching playtimes...");
   const playtimes = await fetchPlaytimes(all.map((a) => a.g.id));
   console.log(`  playtimes for ${playtimes.size} games`);
+  console.log("Resolving store listings via IsThereAnyDeal...");
+  const stores = await resolveStores(all);
+  console.log(`  skipped ${[...stores.values()].filter((r) => r === null).length} duplicates / unusable entries`);
   console.log("Saving...");
-  await save(all, playtimes);
-  console.log("Linking IsThereAnyDeal ids...");
-  await linkItad();
+  await save(all, playtimes, stores);
   const [stats] = await q(`SELECT
       (SELECT count(*) FROM games) games,
       (SELECT count(*) FROM games WHERE release_status='upcoming') upcoming,

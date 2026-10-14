@@ -5,19 +5,43 @@
 import { q } from "../db";
 import { itadProvider } from "./itad";
 import type { PricePoint, PriceProvider, PriceQuote, ShopCode } from "./provider";
+import { steamStorePrices } from "./steamStore";
+import { CURRENCY_BY_COUNTRY } from "../search/filters";
 
 export const PRICE_TTL_HOURS = 6;
 const provider: PriceProvider = itadProvider;
 
-type Listing = { listing_id: string; game_id: string; itad_id: string; shop: ShopCode };
+type Listing = { listing_id: string; game_id: string; itad_id: string | null; shop: ShopCode; store_app_id: string };
 
 async function listingsFor(gameIds: (string | number)[]): Promise<Listing[]> {
   return q<Listing>(
-    `SELECT sl.id AS listing_id, sl.game_id, g.itad_id, s.code AS shop
+    `SELECT sl.id AS listing_id, sl.game_id, g.itad_id, s.code AS shop, sl.store_app_id
      FROM store_listings sl JOIN stores s ON s.id = sl.store_id JOIN games g ON g.id = sl.game_id
-     WHERE sl.game_id = ANY($1::bigint[]) AND g.itad_id IS NOT NULL`,
+     WHERE sl.game_id = ANY($1::bigint[])`,
     [gameIds],
   );
+}
+
+/** Steam listings the primary provider didn't price: ask Steam's storefront directly (no history, no sale end). */
+async function steamFallbackQuotes(listings: Listing[], country: string): Promise<Map<string, PriceQuote>> {
+  const out = new Map<string, PriceQuote>();
+  if (!listings.length) return out;
+  const prices = await steamStorePrices(listings.map((l) => l.store_app_id), country);
+  const currency = CURRENCY_BY_COUNTRY[country]?.code ?? "USD";
+  for (const l of listings) {
+    const p = prices.get(l.store_app_id);
+    if (!p) continue;
+    out.set(l.listing_id, {
+      providerGameId: l.itad_id ?? `steam:${l.store_app_id}`,
+      shop: "steam",
+      currency: p.currency || currency,
+      priceCents: p.priceCents,
+      regularCents: p.regularCents,
+      storeLowCents: null,
+      saleEndsAt: null,
+    });
+  }
+  return out;
 }
 
 /** Inserts a snapshot only if price or regular price differs from the latest one. Returns the new snapshot id, if any. */
@@ -78,7 +102,7 @@ async function markFetched(listingId: string, country: string, status: "ok" | "e
 /** Loads the last 12 months of history once per (listing, country) so charts and the wait/buy hint have data on day one. */
 async function backfillHistory(listings: Listing[], country: string) {
   const byGame = new Map<string, Listing[]>();
-  for (const l of listings) byGame.set(l.itad_id, [...(byGame.get(l.itad_id) ?? []), l]);
+  for (const l of listings) if (l.itad_id) byGame.set(l.itad_id, [...(byGame.get(l.itad_id) ?? []), l]);
   const since = new Date(Date.now() - 365 * 86400 * 1000);
   for (const [itadId, ls] of byGame) {
     const points: PricePoint[] = await provider.getHistory(itadId, country, since);
@@ -109,14 +133,17 @@ export async function refreshPrices(gameIds: (string | number)[], country: strin
         [listings.map((l) => l.listing_id), country],
       )).map((r) => r.listing_id),
     );
-    backfilled = listings.filter((l) => !done.has(l.listing_id));
+    backfilled = listings.filter((l) => l.itad_id && !done.has(l.listing_id));
     if (backfilled.length) await backfillHistory(backfilled, country);
   }
 
-  const quotes = await provider.getPrices([...new Set(listings.map((l) => l.itad_id))], country);
+  const itadIds = [...new Set(listings.map((l) => l.itad_id).filter((id): id is string => !!id))];
+  const quotes = itadIds.length ? await provider.getPrices(itadIds, country) : [];
+  const primary = (l: Listing) => quotes.find((x) => x.providerGameId === l.itad_id && x.shop === l.shop) ?? null;
+  const fallback = await steamFallbackQuotes(listings.filter((l) => l.shop === "steam" && !primary(l)), country);
   const changed: RefreshResult["changed"] = [];
   for (const l of listings) {
-    const quote = quotes.find((x) => x.providerGameId === l.itad_id && x.shop === l.shop) ?? null;
+    const quote = primary(l) ?? fallback.get(l.listing_id) ?? null;
     if (!quote) {
       await markFetched(l.listing_id, country, "not_listed");
       continue;
