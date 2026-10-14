@@ -1,5 +1,5 @@
 {
-  "name": "playradar-tmp",
+  "name": "playradar",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,19 +9,27 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.3",
+    "next": "15.5.27",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "next": "15.5.27"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
+    "@huggingface/transformers": "^4.3.1",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "dotenv": "^18.0.7",
     "eslint": "^9",
     "eslint-config-next": "15.5.27",
-    "@eslint/eslintrc": "^3"
+    "pg": "^8.23.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
   }
 }
