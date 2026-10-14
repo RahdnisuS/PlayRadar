@@ -14,6 +14,8 @@ export const FiltersSchema = z.object({
   release_status: z.array(z.enum(["released", "upcoming", "early_access"])).optional(),
   /** Free-text description of what the user wants, embedded for similarity search. */
   query_text: z.string().max(500).default(""),
+  /** Set by the server only (session "Not for me" and "Show similar"); stripped from LLM output. */
+  exclude_ids: z.array(z.string()).optional(),
 });
 export type Filters = z.infer<typeof FiltersSchema>;
 
@@ -28,7 +30,7 @@ export function withDefaults(f: Filters): Filters {
 export function sanitize(f: Filters, vocab: string[]): Filters {
   const byLower = new Map(vocab.map((t) => [t.toLowerCase(), t]));
   const fix = (tags: string[]) => [...new Set(tags.map((t) => byLower.get(t.toLowerCase())).filter((t): t is string => !!t))];
-  return { ...f, tags_any: fix(f.tags_any), tags_exclude: fix(f.tags_exclude) };
+  return { ...f, tags_any: fix(f.tags_any), tags_exclude: fix(f.tags_exclude), exclude_ids: undefined };
 }
 
 let vocabCache: { at: number; tags: { name: string; kind: string }[] } | null = null;

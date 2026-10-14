@@ -11,8 +11,10 @@ export async function explainResults(message: string, games: ExplainInput[]): Pr
     {
       role: "system",
       content:
-        `For each game, write one spoiler-free line (max 18 words) on why it fits the player's request. ` +
-        `Use only the facts given; don't mention price. Input lines: id|title|tags|coop|hours|summary. ` +
+        `For each game, write one spoiler-free line (max 18 words) on what makes it a good pick for the player's request. ` +
+        `Use only the facts given. Never claim a game meets a requirement (length, price, player count, content) unless ` +
+        `the facts show it; skip requirements you can't confirm instead of mentioning them. Don't mention price or ` +
+        `say what the game lacks. Input lines: id|title|tags|coop|hours|summary. ` +
         `Respond with JSON {"reasons":{"<id>":"<line>"}}.`,
     },
     { role: "user", content: `Request: ${message}\n${lines}` },

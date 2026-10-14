@@ -54,8 +54,12 @@ const CURRENCY_SYMBOLS = /(?:₹|rs\.?|inr|rupees?|\$|usd|dollars?|£|gbp|pounds
 
 function parseBudget(text: string, country: string): number | undefined {
   if (/\bfree\b(?![- ]to[- ]play)/.test(text) && !/\bfree time\b/.test(text)) return 0;
+  // The amount must not be a duration ("under 15 hours" is playtime, not a price).
   const m = text.match(
-    new RegExp(`(?:under|below|less than|max(?:imum)?|up ?to|within|cheaper than|<|budget(?: of| is)?)\\s*${CURRENCY_SYMBOLS.source}?\\s*(\\d[\\d,]*(?:\\.\\d+)?)\\s*${CURRENCY_SYMBOLS.source}?`),
+    new RegExp(
+      `(?:under|below|less than|(?:nothing|not|no) (?:over|above|more than)|no more than|max(?:imum)?|up ?to|within|cheaper than|<|budget(?: of| is)?)` +
+        `\\s*${CURRENCY_SYMBOLS.source}?\\s*(\\d[\\d,]*(?:\\.\\d+)?)(?![\\d,.])(?!\\s*(?:h\\b|hrs?\\b|hours?|mins?\\b|minutes?))\\s*${CURRENCY_SYMBOLS.source}?`,
+    ),
   );
   if (m) return toCents(Number(m[1].replace(/,/g, "")));
   if (/\bcheap\b|\bbudget\b|\binexpensive\b|\bbroke\b/.test(text)) return toCents(CURRENCY_BY_COUNTRY[country]?.cheap ?? 10);

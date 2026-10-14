@@ -21,6 +21,9 @@ export type ResultGame = {
   price_cents: number | null;
   regular_cents: number | null;
   currency: string | null;
+  stores: { shop: "steam" | "epic"; url: string; app_link: string | null }[];
+  /** Already-selected video, if this game has one cached (free to show; selection happens on demand). */
+  video_youtube_id: string | null;
 };
 
 type MatchRow = { game_id: string; score: number; matched_tags: string[] };
@@ -38,7 +41,11 @@ export async function loadGames(ids: string[], country: string): Promise<Omit<Re
             g.avg_playtime_hrs::float AS avg_playtime_hrs,
             COALESCE(array_agg(t.name ORDER BY t.kind, t.name) FILTER (WHERE t.kind <> 'mood'), '{}') AS tags,
             COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.kind = 'mood'), '{}') AS moods,
-            p.current_cents AS price_cents, p.regular_cents, p.currency
+            p.current_cents AS price_cents, p.regular_cents, p.currency,
+            (SELECT COALESCE(json_agg(json_build_object('shop', s.code, 'url', sl.store_url, 'app_link', sl.steam_app_link)
+                                      ORDER BY s.code DESC), '[]')
+             FROM store_listings sl JOIN stores s ON s.id = sl.store_id WHERE sl.game_id = g.id) AS stores,
+            (SELECT v.youtube_id FROM videos v WHERE v.game_id = g.id AND v.is_selected AND v.status = 'ok') AS video_youtube_id
      FROM games g
      LEFT JOIN game_tags gt ON gt.game_id = g.id
      LEFT JOIN tags t ON t.id = gt.tag_id

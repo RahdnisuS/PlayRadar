@@ -1,22 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatPrice } from "@/lib/format";
-
-type Result = {
-  id: string;
-  recommendationId: string;
-  title: string;
-  cover_url: string | null;
-  release_status: string;
-  release_date: string | null;
-  tags: string[];
-  moods: string[];
-  reason: string;
-  price_cents: number | null;
-  regular_cents: number | null;
-  currency: string | null;
-};
+import { ResultCard, type Result } from "./ResultCard";
 
 type Turn =
   | { role: "user"; text: string }
@@ -44,15 +29,24 @@ export function Chat() {
   async function send(text: string) {
     const message = text.trim();
     if (!message || busy) return;
-    setTurns((t) => [...t, { role: "user", text: message }]);
     setInput("");
+    await request(message, { message, sessionId: sessionId.current });
+  }
+
+  async function showSimilar(recommendationId: string) {
+    if (busy || !sessionId.current) return;
+    await request("Show me similar games", { similarTo: recommendationId, sessionId: sessionId.current });
+  }
+
+  async function request(label: string, body: Record<string, unknown>) {
+    setTurns((t) => [...t, { role: "user", text: label }]);
     setBusy(true);
     setError(null);
     try {
       const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, sessionId: sessionId.current }),
+        body: JSON.stringify(body),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Something went wrong.");
@@ -94,7 +88,7 @@ export function Chat() {
               <p className="text-sm">{t.text}</p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {t.results.map((r, rank) => (
-                  <ResultCard key={r.recommendationId} result={r} rank={rank + 1} />
+                  <ResultCard key={r.recommendationId} result={r} rank={rank + 1} onSimilar={showSimilar} />
                 ))}
               </div>
               {!t.usedLlm && t.results.length > 0 && (
@@ -133,35 +127,3 @@ export function Chat() {
   );
 }
 
-function ResultCard({ result: r, rank }: { result: Result; rank: number }) {
-  const discount =
-    r.price_cents != null && r.regular_cents ? Math.round(((r.regular_cents - r.price_cents) / r.regular_cents) * 100) : 0;
-  return (
-    <article className="flex gap-3 rounded-lg border border-border bg-surface-2 p-2">
-      {r.cover_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={r.cover_url} alt="" className="h-28 w-20 shrink-0 rounded object-cover" />
-      ) : (
-        <div className="h-28 w-20 shrink-0 rounded bg-bg" />
-      )}
-      <div className="min-w-0 space-y-1">
-        <h3 className="text-sm font-semibold leading-tight">
-          <span className="mr-1 text-muted">{rank}.</span>
-          {r.title}
-        </h3>
-        <p className="text-xs leading-snug">{r.reason}</p>
-        <p className="line-clamp-1 text-xs text-muted">{[...r.moods, ...r.tags].slice(0, 4).join(" · ")}</p>
-        <p className="text-xs">
-          {r.release_status === "upcoming" ? (
-            <span className="text-muted">Upcoming{r.release_date ? ` · ${new Date(r.release_date).getFullYear()}` : ""}</span>
-          ) : r.price_cents != null && r.currency ? (
-            <>
-              {r.price_cents === 0 ? "Free" : formatPrice(r.price_cents, r.currency)}
-              {discount > 0 && <span className="ml-1 rounded bg-sale/15 px-1 text-sale">-{discount}%</span>}
-            </>
-          ) : null}
-        </p>
-      </div>
-    </article>
-  );
-}

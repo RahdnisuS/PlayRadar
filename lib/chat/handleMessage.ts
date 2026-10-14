@@ -62,6 +62,91 @@ function describe(f: Filters, country: string): string {
   return bits.join(" · ");
 }
 
+/** Games the user rejected with "Not for me" in this session (signed-in users are also excluded inside match_games). */
+async function sessionExclusions(sessionId: string): Promise<string[]> {
+  const rows = await q<{ game_id: string }>(
+    `SELECT DISTINCT r.game_id FROM recommendations r JOIN recommendation_events e ON e.recommendation_id = r.id
+     WHERE r.session_id = $1 AND e.event_type = 'not_interested'`,
+    [sessionId],
+  );
+  return rows.map((r) => String(r.game_id));
+}
+
+async function persistTurn(
+  sessionId: string, userText: string, filters: Filters, usedLlm: boolean, reply: string, games: ResultGame[], reasons: Record<string, string>,
+) {
+  await q(
+    `INSERT INTO chat_messages (session_id, role, content, extracted_filters, used_llm) VALUES
+       ($1, 'user', $2, $3, $4), ($1, 'assistant', $5, NULL, $4)`,
+    [sessionId, userText, JSON.stringify(filters), usedLlm, reply],
+  );
+  const recIds = await q<{ id: string; game_id: string }>(
+    `INSERT INTO recommendations (session_id, game_id, rank, match_score, reason)
+     SELECT $1, x.game_id, x.rank, x.score, x.reason
+     FROM unnest($2::bigint[], $3::smallint[], $4::real[], $5::text[]) AS x(game_id, rank, score, reason)
+     RETURNING id, game_id`,
+    [sessionId, games.map((g) => g.id), games.map((_, i) => i + 1), games.map((g) => g.score), games.map((g) => reasons[g.id])],
+  );
+  await q(`UPDATE chat_sessions SET state = $2 WHERE id = $1`, [sessionId, games.length ? "showing_results" : "discovering"]);
+  const recByGame = new Map(recIds.map((r) => [String(r.game_id), String(r.id)]));
+  return games.map((g) => ({ ...g, recommendationId: recByGame.get(g.id)!, reason: reasons[g.id] }));
+}
+
+function templated(games: ResultGame[], into: Record<string, string>) {
+  for (const g of games) {
+    into[g.id] ??= templateReason({
+      title: g.title, matched_tags: g.matched_tags, moods: g.moods, is_coop: g.is_coop,
+      avg_playtime_hrs: g.avg_playtime_hrs, price_cents: g.price_cents, currency: g.currency, release_status: g.release_status,
+    });
+  }
+  return into;
+}
+
+/**
+ * "Show similar": search around a recommended game's own embedding, keeping the session's hard constraints
+ * (budget, player mode, release status) but not its genre/mood tags. Costs no filter-extraction LLM call.
+ */
+export async function handleSimilar(opts: { who: Identity; country: string; sessionId: string; recommendationId: string }): Promise<ChatResult | null> {
+  const { who, country } = opts;
+  const userId = who.kind === "user" ? who.userId : null;
+  const [src] = await q<{ game_id: string; title: string; embedding: string | null; session_id: string }>(
+    `SELECT r.game_id, g.title, g.embedding::text AS embedding, r.session_id
+     FROM recommendations r JOIN chat_sessions s ON s.id = r.session_id JOIN games g ON g.id = r.game_id
+     WHERE r.id = $1 AND s.id = $2 AND (s.user_id = $3::uuid OR s.guest_token = $4)`,
+    [opts.recommendationId, opts.sessionId, userId, who.kind === "guest" ? who.token : null],
+  );
+  if (!src) return null;
+  const sessionId = String(src.session_id);
+  const prev = (await previousFilters(sessionId)) ?? FiltersSchema.parse({});
+  const shown = await q<{ game_id: string }>(`SELECT DISTINCT game_id FROM recommendations WHERE session_id = $1`, [sessionId]);
+  const filters: Filters = {
+    ...prev,
+    tags_any: [],
+    query_text: `games like ${src.title}`,
+  };
+  const effective = withDefaults({
+    ...filters,
+    exclude_ids: [...new Set([src.game_id, ...shown.map((s) => s.game_id), ...(await sessionExclusions(sessionId))].map(String))],
+  });
+  const emb = src.embedding ? (JSON.parse(src.embedding) as number[]) : await embedQuery(`games like ${src.title}`);
+  const { games } = await retrieve(effective, emb, country, userId);
+
+  const reasons: Record<string, string> = {};
+  if (games.length && (await tryConsume("explain"))) {
+    try {
+      Object.assign(reasons, await explainResults(`more games like ${src.title}`, games.map((g) => ({
+        id: g.id, title: g.title, tags: [...g.tags, ...g.moods], summary: g.summary, coop: g.is_coop, hours: g.avg_playtime_hrs,
+      }))));
+    } catch {
+      // templates below
+    }
+  }
+  templated(games, reasons);
+  const reply = games.length ? `More like ${src.title}:` : `I couldn't find more games like ${src.title} with your current filters.`;
+  const results = await persistTurn(sessionId, `More like ${src.title}`, prev, false, reply, games, reasons);
+  return { sessionId, reply, usedLlm: false, cache: null, results };
+}
+
 export async function handleMessage(opts: {
   who: Identity;
   ip: string;
@@ -121,7 +206,8 @@ export async function handleMessage(opts: {
     }
     filters ??= sanitize(parseFallback(message, country, prev ?? undefined), vocabNames);
   }
-  const effective = withDefaults(filters);
+  const excluded = await sessionExclusions(sessionId);
+  const effective = withDefaults({ ...filters, exclude_ids: excluded.length ? excluded : undefined });
 
   // 3. Retrieval. Embed the restated request when it differs from the raw message (follow-up turns).
   const queryText = effective.query_text || message;
@@ -142,12 +228,7 @@ export async function handleMessage(opts: {
       // fall through to templates
     }
   }
-  for (const g of games) {
-    reasons[g.id] ??= templateReason({
-      title: g.title, matched_tags: g.matched_tags, moods: g.moods, is_coop: g.is_coop,
-      avg_playtime_hrs: g.avg_playtime_hrs, price_cents: g.price_cents, currency: g.currency, release_status: g.release_status,
-    });
-  }
+  templated(games, reasons);
 
   // 5. Cache LLM work (filters + reasons) for a day.
   if (usedLlm) {
@@ -168,26 +249,6 @@ export async function handleMessage(opts: {
       (relaxed ? ` Not enough exact matches, so I ${relaxed}.` : "")
     : `I couldn't find anything in our catalog for that${summary ? ` (${summary})` : ""}. Try a bigger budget or fewer requirements.`;
 
-  await q(
-    `INSERT INTO chat_messages (session_id, role, content, extracted_filters, used_llm) VALUES
-       ($1, 'user', $2, $3, $4), ($1, 'assistant', $5, NULL, $4)`,
-    [sessionId, message, JSON.stringify(filters), usedLlm, reply],
-  );
-  const recIds = await q<{ id: string; game_id: string }>(
-    `INSERT INTO recommendations (session_id, game_id, rank, match_score, reason)
-     SELECT $1, x.game_id, x.rank, x.score, x.reason
-     FROM unnest($2::bigint[], $3::smallint[], $4::real[], $5::text[]) AS x(game_id, rank, score, reason)
-     RETURNING id, game_id`,
-    [sessionId, games.map((g) => g.id), games.map((_, i) => i + 1), games.map((g) => g.score), games.map((g) => reasons[g.id])],
-  );
-  await q(`UPDATE chat_sessions SET state = $2 WHERE id = $1`, [sessionId, games.length ? "showing_results" : "discovering"]);
-  const recByGame = new Map(recIds.map((r) => [String(r.game_id), String(r.id)]));
-
-  return {
-    sessionId: String(sessionId),
-    reply,
-    usedLlm,
-    cache,
-    results: games.map((g) => ({ ...g, recommendationId: recByGame.get(g.id)!, reason: reasons[g.id] })),
-  };
+  const results = await persistTurn(String(sessionId), message, filters, usedLlm, reply, games, reasons);
+  return { sessionId: String(sessionId), reply, usedLlm, cache, results };
 }
