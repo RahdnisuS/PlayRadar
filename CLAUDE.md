@@ -14,7 +14,11 @@ Everything must stay within free tiers. Each external dependency sits behind an 
 npm run dev            # Next.js dev server
 npm run build          # production build (the home page queries the DB at build time)
 npm run lint           # ESLint
-npx tsc --noEmit       # typecheck (CI runs lint + this; there are no tests yet)
+npx tsc --noEmit       # typecheck (CI runs lint + this)
+
+# Offline checks (no API calls, exit 1 on failure) - the closest thing to unit tests
+npx tsx scripts/check-fallback.ts       # keyword fallback parser cases
+npx tsx scripts/check-video-rules.ts    # video title / spoiler / sequel rules
 
 # Offline scripts / jobs (tsx, load .env.local via scripts/env.ts)
 npx tsx scripts/seed-igdb.ts [--released 1700] [--upcoming 300]   # catalog seed + ITAD id resolution (re-runnable, upserts)
@@ -31,7 +35,9 @@ npx supabase db push --db-url "$DATABASE_URL"                     # apply supaba
 npx supabase functions deploy embed --no-verify-jwt --project-ref <ref> --use-api
 ```
 
-Run seed scripts in this order: seed-igdb, refresh-catalog-prices, rescue-editions, dedupe-editions, mood-tags, embed-catalog. Embeddings include tag text, so mood tags must exist first. `scripts/inspect-igdb.ts "<title>"`, `check-llm.ts` and `check-steam-fallback.ts` are debugging helpers.
+Run seed scripts in this order: seed-igdb, refresh-catalog-prices, rescue-editions, dedupe-editions, mood-tags, embed-catalog. Embeddings include tag text, so mood tags must exist first. `scripts/inspect-igdb.ts "<title>"`, `check-llm.ts` and `check-steam-fallback.ts` are debugging helpers. `scripts/test-videos.ts [released] [upcoming]` runs real video selection, and costs about 101 YouTube units per released game.
+
+To test the non-LLM path end to end, start a second dev server with a broken key: `GROQ_API_KEY=invalid npx next dev -p 3101`. On Windows, bash heredocs containing apostrophes have failed in this environment, so write files with the Write tool.
 
 **Catalog policy (user decision):** games that neither price source can price, often because of region locks, **stay in the catalog** and show "Price unavailable". Only delete a game when it duplicates a sellable edition that is already in the catalog. Always run destructive catalog scripts with `--dry` first and show the user the list.
 
@@ -59,6 +65,30 @@ Run seed scripts in this order: seed-igdb, refresh-catalog-prices, rescue-editio
 
 These are reasoning models whose reasoning tokens count against the quota, so prompts stay compact and `reasoning_effort` is set low or none. Errors throw `LlmUnavailableError`, and callers must fall back to the non-LLM path (keyword parser + embedding search + templated reasons). Groq no longer serves Llama chat models on this account.
 
+**Chat turn** (`lib/chat/handleMessage.ts`, `POST /api/chat`):
+1. Rate-limit by IP and by identity. Identity (`lib/auth/identity.ts`) is a Supabase user or a guest, the guest identified by an HMAC-signed `pr_guest` cookie.
+2. Check the `chat_cache` exact hash (normalized text + previous filters + region).
+3. On first turns only, check for a similar-query hit (query embedding cosine ≥ 0.95).
+4. Run `tryConsume("filters", who, ip)`, which applies the per-model global cap plus the guest 10 / user 30 / IP 40 daily turn caps. Then do LLM extraction, falling back to `parseFallback`.
+5. `sanitize()` drops tags that aren't in the vocabulary, plus any `exclude_ids` from the LLM. `withDefaults()` restricts results to released and early-access games unless the user asks for upcoming ones.
+6. `retrieve()` relaxes filters stepwise (playtime → tags → player mode; never price) when there are fewer than 5 hits.
+7. Write the reasons: cached ones, then one `explain` LLM call, then `templateReason`.
+8. Cache the result (LLM turns only), then persist `chat_messages` and `recommendations`.
+
+Follow-up turns merge into the previous turn's `extracted_filters`. Body `{similarTo, sessionId}` runs `handleSimilar` instead: it searches around that game's own embedding and keeps the session's hard constraints. "Not for me" (`/api/events`) excludes the game for the rest of the session. For signed-in users it also writes `user_excluded_games` and adjusts `user_tag_affinity` (`lib/feedback.ts`). Events are only accepted for recommendations belonging to the caller's own session.
+
+**Video** (`lib/video/`). `ensureVideo()` returns the cached `videos.is_selected` row or selects one, lazily, when the user clicks Watch. It must never select eagerly for all 5 results, because of the YouTube quota.
+- Upcoming games use an IGDB trailer, at 1 unit for the embeddability check.
+- Released games use `search.list` with "<title> gameplay overview" and `videoDuration=medium`, then `videos.list`, judged by `rules.ts`:
+  - hard-reject walkthrough, ending, boss, part N, mobile and similar titles;
+  - the game title must appear as a contiguous phrase that isn't followed by a sequel number;
+  - score for an 8–15 minute length, an official channel (matching developer or publisher) or the reputable allowlist, and good title words.
+  - A score ≥ 6 is accepted by rules; 3–5 goes to a `heavy` LLM yes/no check.
+- If no overview qualifies, use the IGDB trailer.
+- YouTube units are counted in `llm_usage_daily` scope `youtube:units` (cap 9000).
+
+`components/VideoPlayer.tsx` uses the IFrame API on youtube-nocookie. Ending or closing the video triggers "Did that look good?" in `ResultCard.tsx`.
+
 **Prices** (`lib/prices/`). `PriceProvider` is the interface and `itad.ts` (IsThereAnyDeal) the primary implementation. ITAD has no Steam price at all for about 6% of games that are on sale (e.g. Arma 3, Skyrim), so `service.ts` fills those gaps from Steam's public storefront API (`steamStore.ts`: batched `appdetails?filters=price_overview`, no key, regional via `cc`, free-to-play stored as price 0). Fallback prices have no history and no sale end date. Shop ids are Steam 61 and Epic 16; prices/v3 takes 200 ids per call, and amounts use `amountInt` minor units. Prices are stored in native currency per region, never converted. The regions are IN (default), US, GB and DE (standing in for the EU). `service.ts` rules:
 - Write a `price_snapshots` row only when the price changes.
 - `price_summary` holds the current price, the per-store all-time low (`storeLow` from ITAD) and `sale_count_12m` (the number of discount starts in the last 12 months).
@@ -75,14 +105,37 @@ All of them must have a Steam or Epic external id. `resolveStores()` handles gam
 
 **Scheduling.** Vercel Hobby cron only runs daily, so recurring jobs (price polling, digests, the Epic free-games check, catalog refresh) are planned as GitHub Actions running `scripts/jobs/*`. The repo is public, so Actions minutes are unlimited. Vercel functions are pinned to `bom1` (Mumbai) to sit next to the Supabase DB.
 
+## Status and roadmap
+
+The work follows a 14-day plan, and the live site is https://play-radar-ten.vercel.app. It deploys automatically on every push to `main`, and its env vars are set in the Vercel dashboard.
+
+| Days | Scope | State |
+|---|---|---|
+| 1–2 | Setup, schema, seed, deployed skeleton | Done |
+| 3–5 | Chat, filters, retrieval, caps, cache, fallback | Done |
+| 6–7 | Video selection and spoiler filtering | Done. No scheduled backfill or re-check job yet |
+| 8–9 | Region dropdown (`lib/region.ts` exists; there's no UI), Buy popup comparing Steam and Epic cheapest-first, all-time-low badge, Recharts history chart, wait-or-buy hint (needs ≥ 6 months of history) | **Next** |
+| 10–11 | Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Not started. User must create a Brevo account (no domain; single verified sender) |
+| 12 | Epic free-games alerts (`epic-free.yml`, Epic `freeGamesPromotions` feed). The feedback loop already exists | Partly done |
+| 13 | 50-game hand-labelled video set (`video_eval_labels`), `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy), responsive polish, fuller legal pages | Not started |
+| 14 | Buffer, README with screenshots and results | Not started |
+
+Current placeholders: **Buy now** shows plain store links (`StoreLinks` in `ResultCard.tsx`), and **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL` is still `localhost`; it must become the live URL before auth redirects are added.
+
 ## Free-tier budgets to respect
 
 | Service | Limit |
 |---|---|
 | YouTube Data API | 10k units/day (search 100, videos.list 1). Select a video once per game and cache it in `videos` |
+| Groq | Per model: about 1000 requests/day, 8K tokens/min, about 200K tokens/day. A full mood-tag run of 2,000 games used about 160K tokens on `heavy` |
 | Brevo email | 300/day, shared with Supabase magic-link SMTP. Alerts are capped near 200/day; the rest stay queued |
 | Supabase | 500 MB storage. The schema's housekeeping deletes keep chat, cache and rate-limit rows bounded |
 | IsThereAnyDeal | 1000 requests / 5 min |
+
+## Working with this user
+
+- The user is new to dev tooling. For anything outside the terminal (dashboards, API keys), give numbered click-by-click steps, one service at a time, and say exactly which `.env.local` line to fill. Never ask them to paste secrets into chat. Check keys by length or by test calls, without printing them.
+- Before every commit, scan the staged diff for the actual values in `.env.local` and for `postgresql://`. Commit messages are descriptive; pushing to `main` deploys to production.
 
 ## Product constraints that are easy to get wrong
 
