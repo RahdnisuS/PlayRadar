@@ -115,6 +115,14 @@ Follow-up turns merge into the previous turn's `extracted_filters`. Body `{simil
 
 All of them must have a Steam or Epic external id. `resolveStores()` handles games with several Steam apps: it picks the ITAD product that currently has a price, then the highest appid, and gives duplicate ITAD products to the more popular IGDB entry. IGDB often points a base game at its delisted original (GTA V → appid 271590), while the sellable re-release is a separate IGDB entry typed as a bundle or expanded game. `rescue-editions.ts` fixes this with Steam store search, using `lib/catalog/editions.ts` to accept only "same title + edition words" matches. IGDB trailer ids are stored in `games.external_ids.igdb_videos` for later video selection, which saves YouTube quota. Playtime uses IGDB's `hastily` (main story) time-to-beat. Epic listings use the slug from the store URL.
 
+**Email** (set up 2026-10-15). Brevo free plan (300/day), no domain, one verified single sender (`EMAIL_FROM`, name `EMAIL_FROM_NAME`).
+- Alerts and digests go through the Brevo transactional API (`POST https://api.brevo.com/v3/smtp/email`, header `api-key: BREVO_API_KEY`, which starts with `xkeysib-`).
+- Supabase auth emails go through Brevo SMTP (`smtp-relay.brevo.com:587`, login `BREVO_SMTP_LOGIN`, password `BREVO_SMTP_KEY`, which starts with `xsmtpsib`). This is configured in Supabase → Authentication → Emails → SMTP Settings; the `.env.local` copies are only for testing.
+- Brevo's "block unknown IP addresses" is **off** for both API and SMTP keys: Vercel, GitHub Actions and Supabase use changing IPs. A 401 with "unrecognised IP address" means it was switched back on.
+- Supabase URL Configuration: Site URL `https://play-radar-ten.vercel.app`; redirect URLs are that `/**` plus `http://localhost:3000/**` and `http://localhost:3100/**`.
+- Supabase email templates are still the defaults. Replace them with PlayRadar templates (no postal address) once the login page exists.
+- Test sends via both routes and a real Supabase magic link reached the inbox, not spam. The user's own auth account now exists, created by that test.
+
 **Scheduling.** Vercel Hobby cron only runs daily, so recurring jobs (price polling, digests, the Epic free-games check, catalog refresh) are planned as GitHub Actions running `scripts/jobs/*`. The repo is public, so Actions minutes are unlimited. Vercel functions are pinned to `bom1` (Mumbai) to sit next to the Supabase DB.
 
 ## Status and roadmap
@@ -127,12 +135,12 @@ The work follows a 14-day plan, and the live site is https://play-radar-ten.verc
 | 3–5 | Chat, filters, retrieval, caps, cache, fallback | Done |
 | 6–7 | Video selection and spoiler filtering | Done. No scheduled backfill or re-check job yet |
 | 8–9 | Region dropdown (header, `pr_region` cookie via `POST /api/region`; the home page renders per request), Buy popup (`BuyDialog.tsx`) comparing Steam and Epic cheapest-first, all-time-low badge, Recharts 3 history chart (lazy-loaded), wait-or-buy hint | Done |
-| 10–11 | **Next.** Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Not started. User must create a Brevo account (no domain; single verified sender) |
+| 10–11 | **In progress.** Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Email infrastructure done (see **Email** below). Next: Vercel env vars, then the code |
 | 12 | Epic free-games alerts (`epic-free.yml`, Epic `freeGamesPromotions` feed). The feedback loop already exists | Partly done |
 | 13 | 50-game hand-labelled video set (`video_eval_labels`), `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy), responsive polish, fuller legal pages | Not started |
 | 14 | Buffer, README with screenshots and results | Not started |
 
-Current placeholder: **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL` is still `localhost`; it must become the live URL before auth redirects are added.
+Current placeholder: **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL` is still `localhost`, and Vercel doesn't have `BREVO_API_KEY` yet; both are the next dashboard step.
 
 ## Free-tier budgets to respect
 
@@ -156,3 +164,4 @@ Current placeholder: **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL
 - The "wait or buy?" hint only appears with enough history; otherwise the UI says tracking just started.
 - Notifications are deduplicated by `notifications (user_id, dedupe_key)`, so a user never receives the same alert twice.
 - Guests can chat but need an email account to wishlist.
+- Email templates (alerts, digests, Supabase auth emails) must **never include the user's postal address** or the address on the Brevo account (user decision). Send only transactional mail (API/SMTP), never Brevo marketing campaigns, which add that address to the footer automatically. Footers carry the site name, why you got the email and the one-click unsubscribe link.
