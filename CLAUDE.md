@@ -135,12 +135,43 @@ The work follows a 14-day plan, and the live site is https://play-radar-ten.verc
 | 3–5 | Chat, filters, retrieval, caps, cache, fallback | Done |
 | 6–7 | Video selection and spoiler filtering | Done. No scheduled backfill or re-check job yet |
 | 8–9 | Region dropdown (header, `pr_region` cookie via `POST /api/region`; the home page renders per request), Buy popup (`BuyDialog.tsx`) comparing Steam and Epic cheapest-first, all-time-low badge, Recharts 3 history chart (lazy-loaded), wait-or-buy hint | Done |
-| 10–11 | **In progress.** Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Email infrastructure done (see **Email** below). Next: Vercel env vars, then the code |
+| 10–11 | **In progress.** Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Email infrastructure and Vercel env vars done. Auth backend pushed but not wired to any UI yet. See **Next session** below |
 | 12 | Epic free-games alerts (`epic-free.yml`, Epic `freeGamesPromotions` feed). The feedback loop already exists | Partly done |
 | 13 | 50-game hand-labelled video set (`video_eval_labels`), `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy), responsive polish, fuller legal pages | Not started |
 | 14 | Buffer, README with screenshots and results | Not started |
 
-Current placeholder: **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL` is still `localhost`, and Vercel doesn't have `BREVO_API_KEY` yet; both are the next dashboard step.
+Current placeholder: **Wishlist** shows an alert. Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SITE_URL=https://play-radar-ten.vercel.app` (plain Config; a `NEXT_PUBLIC_` variable can't be Sensitive).
+
+### Next session (stopped 2026-10-15, mid Day 10)
+**Done and pushed (auth backend, no UI uses it yet):**
+- `middleware.ts` refreshes the Supabase session, and only runs when an `sb-` cookie exists.
+- `POST /api/auth/login` takes `{email, next}` and sends the magic link. Rate limits: 5/IP/h, 3/email/h, 80/day global (auth shares Brevo's 300/day with alerts). `emailRedirectTo` is `<origin>/auth/confirm?next=<path>`.
+- `GET /auth/confirm` calls `verifyOtp({type:"email", token_hash})`, sets `users.email_verified`, and moves the guest's `chat_sessions` to the user (via `guestToken()` in `lib/auth/identity.ts`) so feedback on earlier results keeps working.
+- `POST /api/auth/logout`. `GET /api/me` returns `{user: {email, emailDigest, freeGameAlerts, wishlistCount} | null}`.
+- `lib/auth/redirect.ts` has `safeNext()`, which allows only relative paths to prevent open redirects.
+
+**Still to build for login + wishlist (the user rejected the first draft of these files; start them fresh):**
+1. `lib/wishlist.ts` (list / get / save / remove; the cheapest price per region uses the same LATERAL join as `lib/catalog/queries.ts`).
+2. Wishlist API:
+   - `GET /api/wishlist`;
+   - `GET/PUT/DELETE /api/wishlist/[gameId]`. PUT takes the target price in major units, converts it with `toCents` and stores it in the region's currency. It runs `ensureFreshPrices` via `after()` to backfill history.
+3. `PATCH /api/account` for `email_digest` and `free_game_alerts`.
+4. In `/auth/confirm`, copy a valid `pr_region` cookie into `users.country_code`. New users default to IN.
+5. UI:
+   - `AuthButton` in the header (email form, then "check your inbox"; when signed in: My wishlist, Sign out);
+   - a `WishlistButton` in `GameDialog` and `ResultCard`, replacing the alert (log the `wishlisted` event from result cards). Guests get the sign-in form;
+   - a `/wishlist` page with the items, edit/remove, and email preferences;
+   - the copy must say the wishlist is saved on PlayRadar only.
+6. **Supabase email templates (user dashboard step, after the UI exists):** set both **Magic Link** and **Confirm signup** to link to `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email`. Use PlayRadar wording, no postal address. Until then the default templates' links won't reach `/auth/confirm` correctly, which is harmless because no UI calls the login route yet.
+7. Then chunk 2:
+   - an alerts job comparing changed snapshots against wishlists (types sale / all_time_low / target_hit / released, `notifications` dedupe, `try_consume_email` cap of about 200);
+   - Brevo API emails showing the actual price, with an unsubscribe route using `users.unsubscribe_token`;
+   - digests;
+   - GitHub Actions (`prices.yml` every 4h, `daily.yml`, `digests.yml`). Repo secrets needed: `DATABASE_URL`, `ITAD_API_KEY`, `BREVO_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`, `GROQ_API_KEY`, `YOUTUBE_API_KEY` and others as the scripts require. Walk the user through adding them.
+
+**Other leftovers:**
+- Mood redo v2 still has to run for the remaining ~1,000 less popular games (`mood-tags.ts --redo`, then `embed-catalog.ts --all`, then clear `chat_cache`).
+- Search has no typo tolerance (would need pg_trgm; ask first).
 
 ## Free-tier budgets to respect
 

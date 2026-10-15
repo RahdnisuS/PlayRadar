@@ -35,20 +35,23 @@ export async function currentUserId(): Promise<string | null> {
   }
 }
 
+/** The guest token from a validly signed pr_guest cookie, if any (also present after the guest signs in). */
+export async function guestToken(): Promise<string | null> {
+  const raw = (await cookies()).get(GUEST_COOKIE)?.value;
+  if (!raw) return null;
+  const [token, sig] = raw.split(".");
+  const expected = sign(token ?? "");
+  return sig && sig.length === expected.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expected)) ? token : null;
+}
+
 /** Returns the signed-in user, or the guest token (creating the cookie on first visit). */
 export async function getIdentity(): Promise<Identity> {
   const userId = await currentUserId();
   if (userId) return { kind: "user", userId };
 
+  const existing = await guestToken();
+  if (existing) return { kind: "guest", token: existing };
   const store = await cookies();
-  const raw = store.get(GUEST_COOKIE)?.value;
-  if (raw) {
-    const [token, sig] = raw.split(".");
-    const expected = sign(token ?? "");
-    if (sig && sig.length === expected.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
-      return { kind: "guest", token };
-    }
-  }
   const token = randomUUID();
   store.set(GUEST_COOKIE, `${token}.${sign(token)}`, {
     httpOnly: true,
