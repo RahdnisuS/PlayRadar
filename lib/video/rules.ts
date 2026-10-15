@@ -15,6 +15,8 @@ export type Verdict = { score: number; spoilerRisk: number; reject: string | nul
 
 // Titles that signal full playthroughs, spoilers or episodic content.
 const HARD_REJECT = /\b(walkthrough|playthrough|let'?s play|longplay|full game|no commentary|ending|endings|boss|bosses|final (boss|chapter|mission)|spoilers?|part\s*\d+|episode\s*\d+|ep\.?\s*\d+|chapter\s*\d+|mission\s*\d+|act\s*\d+|100%|speedrun|all achievements|lore|story explained|cutscenes?|movie|reaction|mod(s|ded)?\b|tier list|vs\.?\b|android|ios|iphone|mobile|apk|switch 2? (?:port|version))/i;
+// Personal-challenge, competitive and tips videos: popular, but they don't show a newcomer what the game is.
+const OFF_FORMAT = /\b((i|we) (studied|played|spent|tried|beat|survived|became|got)\b|\d+\s*(hours|days|years)\b|pro (gameplay|players?|tips|settings)\b|tips\b|tricks\b|how to (win|get|improve|be|play better)\b|ranked\b|tournaments?\b|cup\b|fncs\b|esports?\b|competitive\b|highlights\b|montage\b|funny moments\b|challenges?\b|clutch\b|\d+\s*(kills|wins)\b|world record)/i;
 const SOFT_RISK = /\b(secret|hidden|twist|true|last|death|dies|killer|reveal(ed)?|post[- ]game|dlc)\b/i;
 const GOOD_WORDS = /\b(gameplay|overview|features?|first look|first impressions?|impressions|before you buy|review|preview|showcase|deep dive|beginner'?s guide|is it worth|should you buy|explained in)\b/i;
 
@@ -58,6 +60,7 @@ export function mentionsGame(videoTitle: string, gameTitle: string): boolean {
 export function judgeOverview(c: Candidate, game: { title: string; developer: string | null; publisher: string | null }): Verdict {
   if (!c.embeddable) return { score: 0, spoilerRisk: 0, reject: "not embeddable" };
   if (HARD_REJECT.test(c.title)) return { score: 0, spoilerRisk: 1, reject: "spoiler/long-form title" };
+  if (OFF_FORMAT.test(c.title)) return { score: 0, spoilerRisk: 0, reject: "challenge/competitive/tips video" };
   if (!mentionsGame(c.title, game.title)) return { score: 0, spoilerRisk: 0, reject: "different game" };
   const m = minutes(c.durationSec);
   if (m < 5 || m > 22) return { score: 0, spoilerRisk: 0, reject: "duration" };

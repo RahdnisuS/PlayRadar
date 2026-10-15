@@ -60,10 +60,12 @@ export function GameDialog({
   }, [gameId]);
 
   const year = game?.release_date ? new Date(game.release_date).getFullYear() : null;
+  const eaYear = game?.early_access_date ? new Date(game.early_access_date).getFullYear() : null;
   const subtitle = game && (
     <>
       {STATUS_LABEL[game.release_status]}
-      {year ? ` · ${year}` : ""}
+      {year ? ` ${year}` : ""}
+      {eaYear && eaYear !== year ? ` · Early access from ${eaYear}` : ""}
       {game.developer ? ` · ${game.developer}` : ""}
       {game.publisher && game.publisher !== game.developer ? ` / ${game.publisher}` : ""}
     </>

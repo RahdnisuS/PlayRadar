@@ -144,7 +144,7 @@ function StoreRow({ s, cheapest, upcoming, onClick }: { s: StorePrice; cheapest:
         </a>
         {s.appLink && (
           <a href={s.appLink} onClick={onClick} className="rounded-full border border-border px-3 py-1 hover:border-accent hover:text-accent">
-            Open in Steam app
+            Open in {s.shop === "steam" ? "Steam" : "Epic"} app
           </a>
         )}
       </div>

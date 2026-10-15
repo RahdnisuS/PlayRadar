@@ -8,6 +8,7 @@ export type GameDetails = {
   cover_url: string | null;
   release_status: "released" | "upcoming" | "early_access";
   release_date: string | null;
+  early_access_date: string | null; // set only when early access started well before release_date
   developer: string | null;
   publisher: string | null;
   avg_playtime_hrs: number | null;
@@ -22,7 +23,7 @@ export type GameDetails = {
 
 export async function getGameDetails(id: string): Promise<GameDetails | null> {
   const [row] = await q<GameDetails>(
-    `SELECT g.id, g.title, g.summary, g.cover_url, g.release_status, g.release_date::text, g.developer, g.publisher,
+    `SELECT g.id, g.title, g.summary, g.cover_url, g.release_status, g.release_date::text, g.early_access_date::text, g.developer, g.publisher,
             g.avg_playtime_hrs::float AS avg_playtime_hrs, g.is_multiplayer, g.is_coop,
             COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.kind = 'genre'), '{}') AS genres,
             COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.kind = 'theme'), '{}') AS themes,

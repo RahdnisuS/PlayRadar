@@ -20,6 +20,8 @@ const base = { youtubeId: "x", channelTitle: "IGN", description: "", durationSec
 for (const [title, wantReject] of [
   ["Elden Ring Walkthrough Part 1", true], ["Elden Ring - Ending", true], ["Elden Ring All Bosses", true],
   ["Elden Ring Gameplay Overview", false], ["Elden Ring Mobile Gameplay", true],
+  ["I Studied Elden Ring Pro Gameplay for 100 Hours (Here's What I Learned)", true], ["Elden Ring Tournament Highlights", true],
+  ["Elden Ring Tips and Tricks for Beginners", true], ["Elden Ring - Before You Buy", false], ["Elden Ring Review", false],
 ] as const) {
   const v = judgeOverview({ ...base, title }, g);
   const ok = !!v.reject === wantReject;

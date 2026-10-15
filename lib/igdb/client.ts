@@ -49,9 +49,9 @@ export const POP_STEAM_MOST_WISHLISTED_UPCOMING = 10;
 
 export const coverUrl = (imageId: string) => `https://images.igdb.com/igdb/image/upload/t_cover_big/${imageId}.jpg`;
 
-/** "https://store.epicgames.com/en-US/p/hades" -> "hades" */
+/** "https://store.epicgames.com/en-US/p/hades" or "https://www.epicgames.com/store/p/hades" -> "hades" */
 export function epicSlugFromUrl(url?: string): string | null {
   if (!url) return null;
-  const m = url.match(/epicgames\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?(?:p|product)\/([^/?#]+)/);
+  const m = url.match(/epicgames\.com\/(?:store\/)?(?:[a-z]{2}-[A-Z]{2}\/)?(?:p|product)\/([^/?#]+)/);
   return m ? m[1] : null;
 }

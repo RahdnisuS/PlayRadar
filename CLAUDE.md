@@ -26,7 +26,9 @@ npx tsx scripts/seed-igdb.ts [--released 1700] [--upcoming 300]   # catalog seed
 npx tsx scripts/jobs/refresh-catalog-prices.ts [--country XX] [--report-unsold]  # prices for whole catalog in all 4 regions; report lists unpriced games
 npx tsx scripts/rescue-editions.ts [--dry]                        # repoint delisted Steam originals to the edition Steam sells
 npx tsx scripts/dedupe-editions.ts [--dry]                        # delete unpriced games whose sellable edition is already in catalog
-npx tsx scripts/mood-tags.ts [--limit N]                          # LLM mood tags for games lacking them
+npx tsx scripts/add-epic-listings.ts [--dry]                      # add Epic listings IGDB missed (via ITAD deal links); additive
+npx tsx scripts/enrich-igdb.ts [--dry]                            # IGDB keyword sub-genre tags + early_access_date; additive
+npx tsx scripts/mood-tags.ts [--limit N] [--redo]                 # LLM mood tags for games lacking them; --redo re-tags mood_v<2 games
 npx tsx scripts/embed-catalog.ts [--all]                          # gte-small embeddings for games lacking them
 npx tsx scripts/probe-itad.ts                                     # sanity-check ITAD Steam/Epic prices per region
 npx tsx scripts/check-embed.ts                                    # edge-function vs local embedding parity (cosine should be 1.0)
@@ -36,7 +38,9 @@ npx supabase db push --db-url "$DATABASE_URL"                     # apply supaba
 npx supabase functions deploy embed --no-verify-jwt --project-ref <ref> --use-api
 ```
 
-Run seed scripts in this order: seed-igdb, refresh-catalog-prices, rescue-editions, dedupe-editions, mood-tags, embed-catalog. Embeddings include tag text, so mood tags must exist first. `scripts/inspect-igdb.ts "<title>"`, `check-llm.ts` and `check-steam-fallback.ts` are debugging helpers. `scripts/test-videos.ts [released] [upcoming]` runs real video selection, and costs about 101 YouTube units per released game.
+Run seed scripts in this order: seed-igdb, refresh-catalog-prices, rescue-editions, dedupe-editions, add-epic-listings, mood-tags, embed-catalog. Embeddings include tag text, so mood tags must exist first. seed-igdb already does what enrich-igdb does; enrich-igdb is for games seeded before 2026-10-15.
+
+**Tags.** Genres/themes/modes come from IGDB. Sub-genres players search for (Soulslike, Metroidvania, Roguelike, Action RPG, Deckbuilder…) come from a curated IGDB-keyword map in `lib/igdb/enrich.ts` and are stored as kind `genre`; "top-down"/"isometric" keywords map to `Bird view / Isometric`. Moods are LLM-generated from title, genres, keywords and a short summary. Mood redo v2 (with keywords) ran for the top 1,000 games on 2026-10-15; run `mood-tags.ts --redo` again to finish the rest, then `embed-catalog.ts --all`. Raw keywords are kept in `games.external_ids.igdb_keywords`. `games.early_access_date` is the PC early-access start when it is ≥ 60 days before the full release (IGDB's `first_release_date` is the full release). `scripts/inspect-igdb.ts "<title>"`, `check-llm.ts` and `check-steam-fallback.ts` are debugging helpers. `scripts/test-videos.ts [released] [upcoming]` runs real video selection, and costs about 101 YouTube units per released game.
 
 To test the non-LLM path end to end, start a second dev server with a broken key: `GROQ_API_KEY=invalid npx next dev -p 3101`. On Windows, bash heredocs containing apostrophes have failed in this environment, so write files with the Write tool.
 
@@ -81,7 +85,7 @@ Follow-up turns merge into the previous turn's `extracted_filters`. Body `{simil
 **Video** (`lib/video/`). `ensureVideo()` returns the cached `videos.is_selected` row or selects one, lazily, when the user clicks Watch. It must never select eagerly for all 5 results, because of the YouTube quota.
 - Upcoming games use an IGDB trailer, at 1 unit for the embeddability check.
 - Released games use `search.list` with "<title> gameplay overview" and `videoDuration=medium`, then `videos.list`, judged by `rules.ts`:
-  - hard-reject walkthrough, ending, boss, part N, mobile and similar titles;
+  - hard-reject walkthrough, ending, boss, part N, mobile and similar titles, plus off-format ones (personal challenges like "I played X for 100 hours", pro/competitive play, tournaments, tips, montages);
   - the game title must appear as a contiguous phrase that isn't followed by a sequel number;
   - score for an 8–15 minute length, an official channel (matching developer or publisher) or the reputable allowlist, and good title words.
   - A score ≥ 6 is accepted by rules; 3–5 goes to a `heavy` LLM yes/no check.
@@ -101,6 +105,8 @@ Follow-up turns merge into the previous turn's `extracted_filters`. Body `{simil
 - ITAD `history/v2` rejects fractional seconds in `since`.
 - `lib/prices/details.ts` builds the Buy popup data (`GET /api/games/[id]/prices`). History coverage counts as 12 months once backfilled. `lib/prices/hint.ts` is the wait-or-buy rule; it needs ≥ 6 months of coverage.
 - ITAD doesn't list free Epic games (e.g. Fortnite), and there's no Epic fallback, so they show "Price unavailable".
+- IGDB misses many Epic listings; `add-epic-listings.ts` finds them through ITAD Epic deals, whose itad.link URL redirects to the Epic page (the slug comes from the redirect; Epic itself answers 403 to scripts).
+- The price chart uses literal hex colours: SVG presentation attributes don't resolve CSS `var()` reliably.
 
 **Catalog** (`lib/igdb/client.ts`, `scripts/seed-igdb.ts`). IGDB is throttled to about 3 requests per second. The seed takes:
 - ~70% all-time most-rated PC games,
@@ -146,7 +152,7 @@ Current placeholder: **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL
 ## Product constraints that are easy to get wrong
 
 - The wishlist lives only in our DB. The UI must never imply it writes to the user's Steam or Epic wishlist.
-- Steam links offer both the https store URL and `steam://store/<appid>`. Epic links are web only.
+- Steam links offer both the https store URL and `steam://store/<appid>`. Epic links offer the https URL and `com.epicgames.launcher://store/p/<slug>` (user decision, 2026-10-15), built from `store_listings.store_app_id` in `lib/prices/details.ts`.
 - The "wait or buy?" hint only appears with enough history; otherwise the UI says tracking just started.
 - Notifications are deduplicated by `notifications (user_id, dedupe_key)`, so a user never receives the same alert twice.
 - Guests can chat but need an email account to wishlist.

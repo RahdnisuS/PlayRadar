@@ -14,6 +14,8 @@ export async function extractFilters(
     `You convert a PC gamer's request into JSON search filters. Never name or invent games.\n` +
     `Allowed tags (use exact spelling):\n` +
     `genres: ${byKind("genre")}\nthemes: ${byKind("theme")}\nmoods: ${byKind("mood")}\nmodes/perspectives: ${byKind("mechanic")}\n` +
+    `Map player slang to these tags: top-down/isometric -> Bird view / Isometric; side-scroller -> Side view; ` +
+    `souls-like -> Soulslike; roguelite -> Roguelike; ARPG -> Action RPG. Put the most specific tags first.\n` +
     `Output JSON keys (omit unknowns): tags_any (tags the game should have, 1-6), tags_exclude (tags to avoid), ` +
     `coop, multiplayer, single_player (booleans), max_price_cents (integer, ${cur.code} minor units: ${cur.symbol}1 = 100; free = 0), ` +
     `min_playtime_hrs, max_playtime_hrs ("short" ~ max 12), release_status (array of released|upcoming|early_access; only if asked), ` +

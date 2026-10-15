@@ -8,7 +8,7 @@ export type StorePrice = {
   shop: ShopCode;
   name: string;
   url: string;
-  appLink: string | null;
+  appLink: string | null; // steam://… or com.epicgames.launcher://… (opens the desktop app if installed)
   priceCents: number | null; // null: not sold in this region / no price found
   regularCents: number | null;
   currency: string | null;
@@ -34,6 +34,7 @@ type Row = {
   shop: ShopCode;
   name: string;
   store_url: string;
+  store_app_id: string;
   steam_app_link: string | null;
   current_cents: number | null;
   lowest_cents: number | null;
@@ -52,7 +53,7 @@ export async function getPriceDetails(gameId: string, country: string): Promise<
   if (!game) return null;
 
   const rows = await q<Row>(
-    `SELECT s.code AS shop, s.name, sl.store_url, sl.steam_app_link,
+    `SELECT s.code AS shop, s.name, sl.store_url, sl.store_app_id, sl.steam_app_link,
             ps.current_cents, ps.lowest_cents, ps.lowest_at, ps.sale_count_12m, ps.tracking_since, ps.history_backfilled_at,
             last.regular_cents, last.currency, last.sale_ends_at, low.low_12m
      FROM store_listings sl
@@ -76,7 +77,7 @@ export async function getPriceDetails(gameId: string, country: string): Promise<
         shop: r.shop,
         name: r.name,
         url: r.store_url,
-        appLink: r.steam_app_link,
+        appLink: r.shop === "epic" ? `com.epicgames.launcher://store/p/${r.store_app_id}` : r.steam_app_link,
         priceCents: priced ? r.current_cents : null,
         regularCents: regular,
         currency: priced ? r.currency : null,

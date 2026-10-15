@@ -37,8 +37,10 @@ async function llmSaysOverview(c: Candidate, gameTitle: string): Promise<boolean
           role: "system",
           content:
             "Decide if a YouTube video is a spoiler-free gameplay overview of a specific game, suitable for someone " +
-            "deciding whether to buy it (not a playthrough, story recap, ending, boss fight, mod showcase or a " +
-            'different game). Respond with JSON {"ok": true|false}.',
+            "deciding whether to buy it: it shows what the game is and how it plays. Say no to playthroughs, story " +
+            "recaps, endings, boss fights, mod showcases, personal challenges or experiments (\"I played X for 100 " +
+            "hours\"), pro/competitive play, tournaments, tips and guides, montages, and videos about a different " +
+            'game. Respond with JSON {"ok": true|false}.',
         },
         {
           role: "user",

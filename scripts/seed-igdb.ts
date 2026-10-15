@@ -9,6 +9,7 @@ import {
   POP_STEAM_MOST_WISHLISTED_UPCOMING,
 } from "../lib/igdb/client";
 import { itadProvider } from "../lib/prices/itad";
+import { earlyAccessDate, ENRICH_FIELDS, tagsFromKeywords, usefulKeywords } from "../lib/igdb/enrich";
 
 const arg = (name: string, def: number) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -36,6 +37,8 @@ type IgdbGame = {
   cover?: { image_id: string };
   videos?: { video_id: string; name: string }[];
   external_games?: { external_game_source: number; uid: string; url?: string }[];
+  keywords?: Named[];
+  release_dates?: { date?: number; platform?: number; status?: { name?: string } }[];
 };
 
 const DETAIL_FIELDS = [
@@ -45,6 +48,7 @@ const DETAIL_FIELDS = [
   "involved_companies.company.name", "involved_companies.developer", "involved_companies.publisher",
   "cover.image_id", "videos.video_id", "videos.name",
   "external_games.external_game_source", "external_games.uid", "external_games.url",
+  ...ENRICH_FIELDS,
 ].join(",");
 
 const BASE_WHERE = `platforms = (6) & game_type = (${GAME_TYPES_BASE}) & game_status != (${STATUSES_SKIP})`;
@@ -188,6 +192,13 @@ async function save(
       for (const t of g.themes ?? []) tagIds.add(await upsertTag(client, t.name, "theme", tagCache));
       for (const t of g.game_modes ?? []) tagIds.add(await upsertTag(client, t.name, "mechanic", tagCache));
       for (const t of g.player_perspectives ?? []) tagIds.add(await upsertTag(client, t.name, "mechanic", tagCache));
+      const keywords = (g.keywords ?? []).map((k) => k.name);
+      for (const t of tagsFromKeywords(keywords)) tagIds.add(await upsertTag(client, t.name, t.kind, tagCache));
+      await client.query(
+        `UPDATE games SET early_access_date = $2, external_ids = external_ids || jsonb_build_object('igdb_keywords', $3::jsonb)
+         WHERE id = $1`,
+        [gameId, earlyAccessDate(g.release_dates, g.first_release_date), JSON.stringify(usefulKeywords(keywords, 20))],
+      );
       for (const tagId of tagIds) {
         await client.query(`INSERT INTO game_tags (game_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [gameId, tagId]);
       }

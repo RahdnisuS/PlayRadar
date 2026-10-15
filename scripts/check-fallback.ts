@@ -13,6 +13,9 @@ const cases: [string, Expect][] = [
   ["free horror games", { max_price_cents: 0, tags: ["Horror"] }],
   ["a short puzzle game", { max_playtime_hrs: 12, tags: ["Puzzle"] }],
   ["no more than 500 rs, strategy", { max_price_cents: 50000, tags: ["Strategy"] }],
+  ["top-down soulslike", { tags: ["Soulslike", "Bird view / Isometric", "challenging"] }],
+  ["a roguelite deckbuilder", { tags: ["Roguelike", "Deckbuilder"], excluded: [] }],
+  ["cozy farming game", { tags: ["cozy", "Farming"] }],
 ];
 
 let fail = 0;
