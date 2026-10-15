@@ -1,13 +1,14 @@
 import { Chat } from "@/components/Chat";
 import { GameCard } from "@/components/GameCard";
 import { getGameCards, type GameCard as Game } from "@/lib/catalog/queries";
-
-export const revalidate = 3600;
+import { currentRegion } from "@/lib/region";
 
 export default async function Home() {
+  // Shelf prices follow the visitor's region cookie, so this page renders per request.
+  const country = await currentRegion(null);
   const [popular, upcoming] = await Promise.all([
-    getGameCards("g.release_status <> 'upcoming'", [], "IN", 12),
-    getGameCards("g.release_status = 'upcoming'", [], "IN", 6),
+    getGameCards("g.release_status <> 'upcoming'", [], country, 12),
+    getGameCards("g.release_status = 'upcoming'", [], country, 6),
   ]);
   return (
     <div className="space-y-10">

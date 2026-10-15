@@ -1,21 +1,27 @@
-// Daily: refresh default-region (IN) current prices for the whole catalog so budget filters work.
-// No history backfill here (that happens lazily per game). ~10 ITAD calls for 2,000 games.
+// Daily: refresh current prices for the whole catalog in every region (IN, US, GB, DE) so budget filters work
+// everywhere. No history backfill here (that happens lazily per game). ~10 ITAD calls per region for 2,000 games.
+// --country XX limits the run to one region.
 // --report-unsold lists released games not sold on Steam/Epic in IN or US. They stay in the catalog and show as
 // "Price unavailable" (often region locks); duplicates of a sellable edition are removed by scripts/dedupe-editions.ts.
 import "../env";
 import { q, closeDb } from "../db";
 import { refreshPrices } from "../../lib/prices/service";
+import { REGIONS, isRegion } from "../../lib/regions";
 
-const COUNTRY = "IN";
+const arg = process.argv[process.argv.indexOf("--country") + 1];
+const COUNTRIES = process.argv.includes("--country") ? [arg] : REGIONS.map((r) => r.code);
 const REPORT = process.argv.includes("--report-unsold");
 
 async function main() {
+  if (!COUNTRIES.every(isRegion)) throw new Error(`Unknown region: ${arg}`);
   const ids = (await q<{ id: string }>(`SELECT id FROM games ORDER BY popularity DESC`)).map((r) => r.id);
-  let changed = 0;
-  for (let i = 0; i < ids.length; i += 200) {
-    const res = await refreshPrices(ids.slice(i, i + 200), COUNTRY, { backfill: false });
-    changed += res.changed.length;
-    console.log(`  ${Math.min(i + 200, ids.length)}/${ids.length} games, ${changed} price changes`);
+  for (const country of COUNTRIES) {
+    let changed = 0;
+    for (let i = 0; i < ids.length; i += 200) {
+      const res = await refreshPrices(ids.slice(i, i + 200), country, { backfill: false });
+      changed += res.changed.length;
+      console.log(`  ${country}: ${Math.min(i + 200, ids.length)}/${ids.length} games, ${changed} price changes`);
+    }
   }
 
   if (REPORT) {

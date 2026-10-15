@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatPrice } from "@/lib/format";
+import { BuyDialog } from "./BuyDialog";
 import { VideoPlayer } from "./VideoPlayer";
 
 export type Result = {
@@ -16,12 +17,13 @@ export type Result = {
   reason: string;
   price_cents: number | null;
   regular_cents: number | null;
+  lowest_cents: number | null;
   currency: string | null;
   stores: { shop: "steam" | "epic"; url: string; app_link: string | null }[];
   video_youtube_id: string | null;
 };
 
-type Phase = "idle" | "loading" | "playing" | "asking" | "buying" | "hidden" | "novideo";
+type Phase = "idle" | "loading" | "playing" | "asking" | "hidden" | "novideo";
 
 export function logEvent(recommendationId: string, type: string, store?: string) {
   fetch("/api/events", {
@@ -35,6 +37,7 @@ export function logEvent(recommendationId: string, type: string, store?: string)
 export function ResultCard({ result: r, rank, onSimilar }: { result: Result; rank: number; onSimilar: (recId: string) => void }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [videoId, setVideoId] = useState<string | null>(r.video_youtube_id);
+  const [buyOpen, setBuyOpen] = useState(false);
 
   async function watch() {
     if (videoId) return setPhase("playing");
@@ -61,7 +64,8 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
 
   const discount =
     r.price_cents != null && r.regular_cents ? Math.round(((r.regular_cents - r.price_cents) / r.regular_cents) * 100) : 0;
-  const expanded = phase === "playing" || phase === "asking" || phase === "buying";
+  const atl = discount > 0 && r.lowest_cents != null && r.price_cents! <= r.lowest_cents;
+  const expanded = phase === "playing" || phase === "asking";
 
   return (
     <article className={`space-y-3 rounded-lg border border-border bg-surface-2 p-2 ${expanded ? "sm:col-span-2 lg:col-span-3" : ""}`}>
@@ -86,15 +90,21 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
               <>
                 {r.price_cents === 0 ? "Free" : formatPrice(r.price_cents, r.currency)}
                 {discount > 0 && <span className="ml-1 rounded bg-sale/15 px-1 text-sale">-{discount}%</span>}
+                {atl && <span className="ml-1 rounded bg-sale/15 px-1 text-sale">All-time low</span>}
               </>
             ) : (
               <span className="text-muted">Price unavailable in your region</span>
             )}
           </p>
           {phase === "idle" && (
-            <button onClick={watch} className="mt-1 rounded-md bg-accent/15 px-2 py-1 text-xs font-medium text-accent hover:bg-accent/25">
-              ▶ Watch {r.release_status === "upcoming" ? "trailer" : "gameplay"}
-            </button>
+            <div className="mt-1 flex flex-wrap gap-2">
+              <button onClick={watch} className="rounded-md bg-accent/15 px-2 py-1 text-xs font-medium text-accent hover:bg-accent/25">
+                ▶ Watch {r.release_status === "upcoming" ? "trailer" : "gameplay"}
+              </button>
+              <button onClick={() => setBuyOpen(true)} className="rounded-md border border-border px-2 py-1 text-xs hover:border-accent hover:text-accent">
+                Compare prices
+              </button>
+            </div>
           )}
           {phase === "loading" && <p className="animate-pulse text-xs text-muted">Finding a spoiler-free video…</p>}
           {phase === "novideo" && (
@@ -119,20 +129,27 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
         />
       )}
 
-      {(phase === "asking" || phase === "buying") && (
+      {phase === "asking" && (
         <div className="space-y-2 rounded-md bg-bg/60 p-2">
           <p className="text-sm">Did that look good?</p>
           <div className="flex flex-wrap gap-2">
-            <Choice onClick={() => { logEvent(r.recommendationId, "liked"); setPhase("buying"); }} primary>
+            <Choice onClick={() => { logEvent(r.recommendationId, "liked"); setBuyOpen(true); }} primary>
               Buy now
             </Choice>
             <Choice onClick={() => alert("Wishlists arrive with accounts very soon.")}>Wishlist</Choice>
             <Choice onClick={() => onSimilar(r.recommendationId)}>Show similar</Choice>
             <Choice onClick={() => { logEvent(r.recommendationId, "not_interested"); setPhase("hidden"); }}>Not for me</Choice>
           </div>
-          {phase === "buying" && <StoreLinks result={r} />}
         </div>
       )}
+
+      <BuyDialog
+        gameId={r.id}
+        title={r.title}
+        open={buyOpen}
+        onClose={() => setBuyOpen(false)}
+        onStoreClick={(shop) => logEvent(r.recommendationId, "store_click", shop)}
+      />
     </article>
   );
 }
@@ -145,32 +162,5 @@ function Choice({ children, onClick, primary }: { children: React.ReactNode; onC
     >
       {children}
     </button>
-  );
-}
-
-/** Temporary store links; replaced by the price comparison popup. */
-function StoreLinks({ result: r }: { result: Result }) {
-  if (!r.stores.length) return <p className="text-xs text-muted">No store page found.</p>;
-  return (
-    <div className="flex flex-wrap gap-3 text-xs">
-      {r.stores.map((s) => (
-        <span key={s.shop} className="space-x-2">
-          <a
-            href={s.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => logEvent(r.recommendationId, "store_click", s.shop)}
-            className="text-accent underline"
-          >
-            {s.shop === "steam" ? "Steam store" : "Epic Games Store"} ↗
-          </a>
-          {s.app_link && (
-            <a href={s.app_link} onClick={() => logEvent(r.recommendationId, "store_click", s.shop)} className="text-muted underline">
-              Open in Steam app
-            </a>
-          )}
-        </span>
-      ))}
-    </div>
   );
 }

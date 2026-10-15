@@ -162,12 +162,19 @@ export async function refreshPrices(gameIds: (string | number)[], country: strin
   return { listings: listings.length, changed };
 }
 
-/** On-demand path for the Buy popup: refresh only if the cached prices are older than the TTL. */
+/**
+ * On-demand path for the Buy popup: refresh if the cached prices are older than the TTL, or if a priced listing
+ * still lacks its 12-month history (the daily catalog job skips the backfill).
+ */
 export async function ensureFreshPrices(gameId: string | number, country: string) {
   const stale = await q(
     `SELECT 1 FROM store_listings sl
+     JOIN games g ON g.id = sl.game_id
      LEFT JOIN price_fetch_state f ON f.listing_id = sl.id AND f.country_code = $2
-     WHERE sl.game_id = $1 AND (f.last_fetched_at IS NULL OR f.last_fetched_at < now() - make_interval(hours => $3))
+     LEFT JOIN price_summary ps ON ps.listing_id = sl.id AND ps.country_code = $2
+     WHERE sl.game_id = $1
+       AND (f.last_fetched_at IS NULL OR f.last_fetched_at < now() - make_interval(hours => $3)
+            OR (g.itad_id IS NOT NULL AND ps.listing_id IS NOT NULL AND ps.history_backfilled_at IS NULL))
      LIMIT 1`,
     [gameId, country, PRICE_TTL_HOURS],
   );

@@ -10,6 +10,9 @@
   --accent: #5eead4;
   --accent-strong: #2dd4bf;
   --sale: #4ade80;
+  /* price chart series (validated for CVD separation on --bg / --surface) */
+  --series-steam: #3987e5;
+  --series-epic: #d95926;
 }
 
 @theme inline {
@@ -22,6 +25,8 @@
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-sale: var(--sale);
+  --color-series-steam: var(--series-steam);
+  --color-series-epic: var(--series-epic);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

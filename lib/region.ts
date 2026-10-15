@@ -1,16 +1,8 @@
 import { cookies } from "next/headers";
 import { q } from "./db";
+import { DEFAULT_REGION, isRegion, REGION_COOKIE, type RegionCode } from "./regions";
 
-export const REGIONS = [
-  { code: "IN", label: "India (₹)" },
-  { code: "US", label: "United States ($)" },
-  { code: "GB", label: "United Kingdom (£)" },
-  { code: "DE", label: "Europe (€)" },
-] as const;
-export type RegionCode = (typeof REGIONS)[number]["code"];
-export const REGION_COOKIE = "pr_region";
-
-export const isRegion = (c: unknown): c is RegionCode => REGIONS.some((r) => r.code === c);
+export { REGIONS, REGION_COOKIE, isRegion, type RegionCode } from "./regions";
 
 /** Signed-in users: their saved country. Guests: the region cookie. Default India. */
 export async function currentRegion(userId: string | null): Promise<RegionCode> {
@@ -19,5 +11,5 @@ export async function currentRegion(userId: string | null): Promise<RegionCode> 
     if (row && isRegion(row.country_code)) return row.country_code;
   }
   const c = (await cookies()).get(REGION_COOKIE)?.value;
-  return isRegion(c) ? c : "IN";
+  return isRegion(c) ? c : DEFAULT_REGION;
 }

@@ -12,17 +12,18 @@ Everything must stay within free tiers. Each external dependency sits behind an 
 
 ```bash
 npm run dev            # Next.js dev server
-npm run build          # production build (the home page queries the DB at build time)
+npm run build          # production build
 npm run lint           # ESLint
 npx tsc --noEmit       # typecheck (CI runs lint + this)
 
 # Offline checks (no API calls, exit 1 on failure) - the closest thing to unit tests
 npx tsx scripts/check-fallback.ts       # keyword fallback parser cases
 npx tsx scripts/check-video-rules.ts    # video title / spoiler / sequel rules
+npx tsx scripts/check-hint.ts           # wait-or-buy hint rules
 
 # Offline scripts / jobs (tsx, load .env.local via scripts/env.ts)
 npx tsx scripts/seed-igdb.ts [--released 1700] [--upcoming 300]   # catalog seed + ITAD id resolution (re-runnable, upserts)
-npx tsx scripts/jobs/refresh-catalog-prices.ts [--report-unsold]  # IN prices for whole catalog; report lists unpriced games
+npx tsx scripts/jobs/refresh-catalog-prices.ts [--country XX] [--report-unsold]  # prices for whole catalog in all 4 regions; report lists unpriced games
 npx tsx scripts/rescue-editions.ts [--dry]                        # repoint delisted Steam originals to the edition Steam sells
 npx tsx scripts/dedupe-editions.ts [--dry]                        # delete unpriced games whose sellable edition is already in catalog
 npx tsx scripts/mood-tags.ts [--limit N]                          # LLM mood tags for games lacking them
@@ -94,7 +95,10 @@ Follow-up turns merge into the previous turn's `extracted_filters`. Body `{simil
 - `price_summary` holds the current price, the per-store all-time low (`storeLow` from ITAD) and `sale_count_12m` (the number of discount starts in the last 12 months).
 - `price_fetch_state` drives a 6h on-demand TTL.
 - The 12-month history is backfilled **lazily**, per listing and country, the first time it's needed (Buy popup or wishlist). This is tracked by `price_summary.history_backfilled_at`.
-- The daily catalog refresh passes `backfill: false`.
+- The daily catalog refresh covers all four regions (user decision, so budget filters work everywhere) and passes `backfill: false`. `ensureFreshPrices` therefore also refreshes when a priced listing still lacks its backfill.
+- ITAD `history/v2` rejects fractional seconds in `since`.
+- `lib/prices/details.ts` builds the Buy popup data (`GET /api/games/[id]/prices`). History coverage counts as 12 months once backfilled. `lib/prices/hint.ts` is the wait-or-buy rule; it needs ≥ 6 months of coverage.
+- ITAD doesn't list free Epic games (e.g. Fortnite), and there's no Epic fallback, so they show "Price unavailable".
 
 **Catalog** (`lib/igdb/client.ts`, `scripts/seed-igdb.ts`). IGDB is throttled to about 3 requests per second. The seed takes:
 - ~70% all-time most-rated PC games,
@@ -114,13 +118,13 @@ The work follows a 14-day plan, and the live site is https://play-radar-ten.verc
 | 1–2 | Setup, schema, seed, deployed skeleton | Done |
 | 3–5 | Chat, filters, retrieval, caps, cache, fallback | Done |
 | 6–7 | Video selection and spoiler filtering | Done. No scheduled backfill or re-check job yet |
-| 8–9 | Region dropdown (`lib/region.ts` exists; there's no UI), Buy popup comparing Steam and Epic cheapest-first, all-time-low badge, Recharts history chart, wait-or-buy hint (needs ≥ 6 months of history) | **Next** |
-| 10–11 | Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Not started. User must create a Brevo account (no domain; single verified sender) |
+| 8–9 | Region dropdown (header, `pr_region` cookie via `POST /api/region`; the home page renders per request), Buy popup (`BuyDialog.tsx`) comparing Steam and Epic cheapest-first, all-time-low badge, Recharts 3 history chart (lazy-loaded), wait-or-buy hint | Done |
+| 10–11 | **Next.** Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Not started. User must create a Brevo account (no domain; single verified sender) |
 | 12 | Epic free-games alerts (`epic-free.yml`, Epic `freeGamesPromotions` feed). The feedback loop already exists | Partly done |
 | 13 | 50-game hand-labelled video set (`video_eval_labels`), `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy), responsive polish, fuller legal pages | Not started |
 | 14 | Buffer, README with screenshots and results | Not started |
 
-Current placeholders: **Buy now** shows plain store links (`StoreLinks` in `ResultCard.tsx`), and **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL` is still `localhost`; it must become the live URL before auth redirects are added.
+Current placeholder: **Wishlist** shows an alert. Vercel's `NEXT_PUBLIC_SITE_URL` is still `localhost`; it must become the live URL before auth redirects are added.
 
 ## Free-tier budgets to respect
 

@@ -49,8 +49,10 @@ export const itadProvider: PriceProvider = {
   },
 
   async getHistory(id, country, since) {
+    // ITAD rejects fractional seconds in `since` (400 "Invalid 'since' format").
+    const sinceParam = encodeURIComponent(since.toISOString().replace(/\.\d+Z$/, "Z"));
     const data = await call<{ timestamp: string; shop: { id: number }; deal: { price: Money; regular: Money } }[]>(
-      `/games/history/v2?id=${id}&country=${country}&shops=${SHOPS_PARAM}&since=${encodeURIComponent(since.toISOString())}`,
+      `/games/history/v2?id=${id}&country=${country}&shops=${SHOPS_PARAM}&since=${sinceParam}`,
     );
     return data
       .filter((h) => SHOP_IDS[h.shop.id])
