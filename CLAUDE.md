@@ -88,7 +88,9 @@ Follow-up turns merge into the previous turn's `extracted_filters`. Body `{simil
 - If no overview qualifies, use the IGDB trailer.
 - YouTube units are counted in `llm_usage_daily` scope `youtube:units` (cap 9000).
 
-`components/VideoPlayer.tsx` uses the IFrame API on youtube-nocookie. Ending or closing the video triggers "Did that look good?" in `ResultCard.tsx`.
+`components/VideoPlayer.tsx` uses the IFrame API on youtube-nocookie. Ending the video or closing it (× in the bar above the video) triggers "Did that look good?" in `ResultCard.tsx`.
+
+**Game popup and search.** Clicking a result card (cover or title), a shelf card or a search suggestion opens `GameDialog.tsx` (`GET /api/games/[id]`, `lib/catalog/details.ts`): description, genres/themes/mood/modes, a video (no autoplay) and a "Where to buy" section (`PricePanel.tsx`, shared with the Buy popup `BuyDialog.tsx`). Opening the popup selects a video for that one game, like clicking Watch, so uncached games cost YouTube quota. The header search (`GameSearch.tsx`, `GET /api/search`, `lib/catalog/search.ts`) matches every typed word as a word prefix of the title, expands abbreviations (gta, cod, bg3…) and matches digits to roman numerals. It has no typo tolerance (that would need pg_trgm).
 
 **Prices** (`lib/prices/`). `PriceProvider` is the interface and `itad.ts` (IsThereAnyDeal) the primary implementation. ITAD has no Steam price at all for about 6% of games that are on sale (e.g. Arma 3, Skyrim), so `service.ts` fills those gaps from Steam's public storefront API (`steamStore.ts`: batched `appdetails?filters=price_overview`, no key, regional via `cc`, free-to-play stored as price 0). Fallback prices have no history and no sale end date. Shop ids are Steam 61 and Epic 16; prices/v3 takes 200 ids per call, and amounts use `amountInt` minor units. Prices are stored in native currency per region, never converted. The regions are IN (default), US, GB and DE (standing in for the EU). `service.ts` rules:
 - Write a `price_snapshots` row only when the price changes.

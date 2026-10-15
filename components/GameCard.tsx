@@ -1,13 +1,23 @@
+"use client";
+
+import { useState } from "react";
 import type { GameCard as Game } from "@/lib/catalog/queries";
 import { formatPrice } from "@/lib/format";
+import { GameDialog } from "./GameDialog";
 
 export function GameCard({ game }: { game: Game }) {
+  const [open, setOpen] = useState(false);
   const discount =
     game.min_price_cents != null && game.regular_cents
       ? Math.round(((game.regular_cents - game.min_price_cents) / game.regular_cents) * 100)
       : 0;
   return (
-    <article className="overflow-hidden rounded-lg border border-border bg-surface">
+    <>
+    <button
+      onClick={() => setOpen(true)}
+      aria-label={`More about ${game.title}`}
+      className="block w-full overflow-hidden rounded-lg border border-border bg-surface text-left transition-colors hover:border-accent"
+    >
       <div className="aspect-[3/4] bg-surface-2">
         {game.cover_url && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -15,9 +25,9 @@ export function GameCard({ game }: { game: Game }) {
         )}
       </div>
       <div className="space-y-1 p-2">
-        <h3 className="line-clamp-1 text-sm font-medium" title={game.title}>
+        <p className="line-clamp-1 text-sm font-medium" title={game.title}>
           {game.title}
-        </h3>
+        </p>
         <p className="line-clamp-1 text-xs text-muted">{game.tags.slice(0, 3).join(" · ")}</p>
         <p className="text-xs">
           {game.release_status === "upcoming" ? (
@@ -34,6 +44,8 @@ export function GameCard({ game }: { game: Game }) {
           )}
         </p>
       </div>
-    </article>
+    </button>
+    {open && <GameDialog gameId={String(game.id)} title={game.title} onClose={() => setOpen(false)} />}
+    </>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatPrice } from "@/lib/format";
 import { BuyDialog } from "./BuyDialog";
+import { GameDialog } from "./GameDialog";
 import { VideoPlayer } from "./VideoPlayer";
 
 export type Result = {
@@ -38,6 +39,7 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
   const [phase, setPhase] = useState<Phase>("idle");
   const [videoId, setVideoId] = useState<string | null>(r.video_youtube_id);
   const [buyOpen, setBuyOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   async function watch() {
     if (videoId) return setPhase("playing");
@@ -70,16 +72,20 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
   return (
     <article className={`space-y-3 rounded-lg border border-border bg-surface-2 p-2 ${expanded ? "sm:col-span-2 lg:col-span-3" : ""}`}>
       <div className="flex gap-3">
-        {r.cover_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={r.cover_url} alt="" className="h-28 w-20 shrink-0 rounded object-cover" />
-        ) : (
-          <div className="h-28 w-20 shrink-0 rounded bg-bg" />
-        )}
+        <button onClick={() => setDetailsOpen(true)} aria-label={`More about ${r.title}`} className="shrink-0 rounded hover:opacity-80">
+          {r.cover_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={r.cover_url} alt="" className="h-28 w-20 rounded object-cover" />
+          ) : (
+            <div className="h-28 w-20 rounded bg-bg" />
+          )}
+        </button>
         <div className="min-w-0 flex-1 space-y-1">
           <h3 className="text-sm font-semibold leading-tight">
             <span className="mr-1 text-muted">{rank}.</span>
-            {r.title}
+            <button onClick={() => setDetailsOpen(true)} className="text-left hover:text-accent hover:underline">
+              {r.title}
+            </button>
           </h3>
           <p className="text-xs leading-snug">{r.reason}</p>
           <p className="line-clamp-1 text-xs text-muted">{[...r.moods, ...r.tags].slice(0, 4).join(" · ")}</p>
@@ -143,13 +149,23 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
         </div>
       )}
 
-      <BuyDialog
-        gameId={r.id}
-        title={r.title}
-        open={buyOpen}
-        onClose={() => setBuyOpen(false)}
-        onStoreClick={(shop) => logEvent(r.recommendationId, "store_click", shop)}
-      />
+      {buyOpen && (
+        <BuyDialog
+          gameId={r.id}
+          title={r.title}
+          onClose={() => setBuyOpen(false)}
+          onStoreClick={(shop) => logEvent(r.recommendationId, "store_click", shop)}
+        />
+      )}
+      {detailsOpen && (
+        <GameDialog
+          gameId={r.id}
+          title={r.title}
+          onClose={() => setDetailsOpen(false)}
+          onStoreClick={(shop) => logEvent(r.recommendationId, "store_click", shop)}
+          onVideoPlay={() => logEvent(r.recommendationId, "video_played")}
+        />
+      )}
     </article>
   );
 }

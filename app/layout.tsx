@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { GameSearch } from "@/components/GameSearch";
 import { RegionSelect } from "@/components/RegionSelect";
 import "./globals.css";
 
@@ -18,10 +19,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} flex min-h-screen flex-col font-sans antialiased`}>
         <header className="border-b border-border">
-          <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-            <Link href="/" className="text-lg font-semibold tracking-tight">
+          <nav className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+            <Link href="/" className="shrink-0 text-lg font-semibold tracking-tight">
               Play<span className="text-accent">Radar</span>
             </Link>
+            <GameSearch />
             <RegionSelect />
           </nav>
         </header>
