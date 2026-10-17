@@ -146,7 +146,7 @@ The work follows a 14-day plan, and the live site is https://play-radar-ten.verc
 
 Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SITE_URL=https://play-radar-ten.vercel.app` (plain Config; a `NEXT_PUBLIC_` variable can't be Sensitive).
 
-### Next session (stopped 2026-10-17, end of Day 11)
+### Next session (stopped 2026-10-17, end of Day 11; resume with item 1 of "Still to do")
 **Login + wishlist (done and pushed 2026-10-17):**
 - Auth: `middleware.ts` refreshes the Supabase session only when an `sb-` cookie exists. `POST /api/auth/login` `{email, next}` sends the magic link (5/IP/h, 3/email/h, 80/day global, since auth shares Brevo's 300/day). `GET /auth/confirm` verifies `token_hash`, sets `users.email_verified`, moves the guest's `chat_sessions` to the user, copies a valid `pr_region` cookie into `users.country_code` (or, with no cookie, sets the cookie from the account). Failures redirect to `/?signin=expired|invalid`, which `AuthButton` turns into a message. `safeNext()` prevents open redirects. `POST /api/auth/logout`, `GET /api/me`.
 - Supabase **Magic Link** and **Confirm signup** templates now link to `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email` with PlayRadar wording, no postal address.
@@ -163,12 +163,24 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SIT
 - `refresh-releases.ts`: IGDB marks planned early-access launches as status EA, so early access needs a past EA date (or past release date); a release date ≥ 60 days after the EA start counts as the full release.
 - GitHub Actions (all in concurrency group `db-jobs`): `prices.yml` (every 4h at :17: poll + alerts), `daily.yml` (21:30 UTC: catalog prices, releases, alerts; 300-min timeout because the runner is in the US and the DB in Mumbai, so watch the first run's duration), `digests.yml` (03:30 UTC). Repo secrets: `DATABASE_URL`, `ITAD_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BREVO_API_KEY`, `EMAIL_FROM`; the sender name and site URL are plain env in the workflow files.
 
-**Still to do:**
-1. Watch the first scheduled runs (especially `daily.yml` duration; batch the per-listing queries in `service.ts` if it's slow).
-2. Day 12: Epic free-games alerts (`epic-free.yml`, `free_promotions`, `free_to_claim` notifications, `users.free_game_alerts`). `send.ts` currently skips `free_to_claim`.
-3. The privacy page promises account deletion from a settings page; that doesn't exist yet (ask before building).
+**Verified 2026-10-17:**
+- `prices.yml` run by hand (Actions → Wishlist prices → Run workflow): green. All workflows now use `actions/checkout@v5` and `actions/setup-node@v5` (Node 20 deprecation warning). The "ubuntu-latest moves to Ubuntu 26 from 2026-10-19" notice needs no action.
+- A test alert email reached Gmail but landed in **Promotions** (Brevo log: delivered). The wishlist page tells Gmail users to drag one to Primary. Check Brevo delivery with `GET https://api.brevo.com/v3/smtp/statistics/events?email=<addr>` (header `api-key`).
+- Brevo **click tracking is on**: links in our emails (store buttons, sign-in links) go through a Brevo redirect. Everything works; the user may switch it off in Brevo's transactional settings (offered, not done).
+- `gh` (GitHub CLI) is not installed here, so the user starts workflows by hand from the Actions tab.
+
+**Still to do, in order** (the user starts the next session later on 2026-10-17):
+1. Once it has happened, check the first scheduled `daily.yml` run (2026-10-17 21:30 UTC = 2026-10-18 03:00 IST) in the Actions tab: success and duration. If resuming before then, skip to item 2 and come back to this. If slow, batch the per-listing queries in `lib/prices/service.ts` (`insertSnapshotIfChanged` / `refreshSummary` / `markFetched` are three round trips per listing, from a US runner to the Mumbai DB). Also glance at the first `digests.yml` run (03:30 UTC).
+2. **Day 12:** Epic free-games alerts. A job (`epic-free.yml` + `scripts/jobs/…`) reads Epic's `freeGamesPromotions` feed, fills `free_promotions`, queues `free_to_claim` notifications for users with `free_game_alerts` on (`promo_id` set), and `send.ts` must stop skipping `free_to_claim`. Games not in our catalog need deciding (ask the user: add them, or skip).
+3. **Day 13:**
+   - 50-game hand-labelled video set (`video_eval_labels`; the user judges the videos);
+   - a `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy);
+   - responsive polish;
+   - fuller privacy/terms pages.
+4. **Day 14:** README with screenshots and results; buffer.
 
 **Other leftovers:**
+- The privacy page promises account deletion from a settings page; that doesn't exist yet (ask before building).
 - Mood redo v2 still has to run for the remaining ~1,000 less popular games (`mood-tags.ts --redo`, then `embed-catalog.ts --all`, then clear `chat_cache`).
 - Search has no typo tolerance (would need pg_trgm; ask first).
 
