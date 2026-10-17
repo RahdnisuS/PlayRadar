@@ -179,7 +179,7 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SIT
 
 **Still to do, in order** (the user starts the next session later on 2026-10-17):
 1. Once it has happened, check the first scheduled `daily.yml` run (2026-10-17 21:30 UTC = 2026-10-18 03:00 IST) in the Actions tab: success and duration. If resuming before then, skip to item 2 and come back to this. If slow, batch the per-listing queries in `lib/prices/service.ts` (`insertSnapshotIfChanged` / `refreshSummary` / `markFetched` are three round trips per listing, from a US runner to the Mumbai DB). Also glance at the first `digests.yml` run (03:30 UTC).
-2. **Day 12: done** (see **Epic free games** below). Watch the first scheduled `epic-free.yml` run (16:40 UTC) once `GROQ_API_KEY` is a repo secret.
+2. **Day 12: done** (see **Epic free games** below), committed locally but **not pushed yet** (ask the user, then push). The `GROQ_API_KEY` repo secret was added 2026-10-17. After pushing: the user ticks the free-games box on `/wishlist`, then watch the first `epic-free.yml` run (16:40 UTC, or run it by hand from the Actions tab) and confirm the free-game email arrives (Bad Cheese / Agent A are free until 2026-10-22 15:00 UTC).
 3. **Day 13:**
    - 50-game hand-labelled video set (`video_eval_labels`; the user judges the videos);
    - a `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy);
