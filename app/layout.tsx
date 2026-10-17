@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { AuthButton } from "@/components/AuthButton";
 import { GameSearch } from "@/components/GameSearch";
 import { RegionSelect } from "@/components/RegionSelect";
 import "./globals.css";
@@ -24,7 +25,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               Play<span className="text-accent">Radar</span>
             </Link>
             <GameSearch />
-            <RegionSelect />
+            <div className="flex shrink-0 items-center gap-3">
+              <RegionSelect />
+              <AuthButton />
+            </div>
           </nav>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>

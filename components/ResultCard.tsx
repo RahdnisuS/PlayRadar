@@ -5,6 +5,7 @@ import { formatPrice } from "@/lib/format";
 import { BuyDialog } from "./BuyDialog";
 import { GameDialog } from "./GameDialog";
 import { VideoPlayer } from "./VideoPlayer";
+import { WishlistButton } from "./WishlistButton";
 
 export type Result = {
   id: string;
@@ -142,7 +143,14 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
             <Choice onClick={() => { logEvent(r.recommendationId, "liked"); setBuyOpen(true); }} primary>
               Buy now
             </Choice>
-            <Choice onClick={() => alert("Wishlists arrive with accounts very soon.")}>Wishlist</Choice>
+            <WishlistButton
+              gameId={r.id}
+              title={r.title}
+              releaseStatus={r.release_status}
+              source="chat"
+              onAdded={() => logEvent(r.recommendationId, "wishlisted")}
+              className={CHOICE_CLASS}
+            />
             <Choice onClick={() => onSimilar(r.recommendationId)}>Show similar</Choice>
             <Choice onClick={() => { logEvent(r.recommendationId, "not_interested"); setPhase("hidden"); }}>Not for me</Choice>
           </div>
@@ -164,17 +172,20 @@ export function ResultCard({ result: r, rank, onSimilar }: { result: Result; ran
           onClose={() => setDetailsOpen(false)}
           onStoreClick={(shop) => logEvent(r.recommendationId, "store_click", shop)}
           onVideoPlay={() => logEvent(r.recommendationId, "video_played")}
+          onWishlisted={() => logEvent(r.recommendationId, "wishlisted")}
         />
       )}
     </article>
   );
 }
 
+const CHOICE_CLASS = "rounded-full border border-border px-3 py-1 text-xs font-medium hover:border-accent hover:text-accent";
+
 function Choice({ children, onClick, primary }: { children: React.ReactNode; onClick: () => void; primary?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-3 py-1 text-xs font-medium ${primary ? "bg-accent text-bg" : "border border-border hover:border-accent hover:text-accent"}`}
+      className={primary ? "rounded-full bg-accent px-3 py-1 text-xs font-medium text-bg" : CHOICE_CLASS}
     >
       {children}
     </button>

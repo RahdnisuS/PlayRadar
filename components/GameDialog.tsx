@@ -6,6 +6,7 @@ import type { ShopCode } from "@/lib/prices/provider";
 import { Modal } from "./Modal";
 import { PricePanel } from "./PricePanel";
 import { VideoPlayer } from "./VideoPlayer";
+import { WishlistButton } from "./WishlistButton";
 
 type VideoState = { status: "loading" } | { status: "ready"; youtubeId: string } | { status: "none" };
 
@@ -25,12 +26,14 @@ export function GameDialog({
   onClose,
   onStoreClick,
   onVideoPlay,
+  onWishlisted,
 }: {
   gameId: string;
   title: string;
   onClose: () => void;
   onStoreClick?: (shop: ShopCode) => void;
   onVideoPlay?: () => void;
+  onWishlisted?: () => void; // set when opened from a chat result
 }) {
   const [game, setGame] = useState<GameDetails | null>(null);
   const [error, setError] = useState(false);
@@ -111,7 +114,19 @@ export function GameDialog({
         </div>
 
         <section className="space-y-2">
-          <h3 className="text-sm font-semibold">Where to buy</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">Where to buy</h3>
+            {game && (
+              <WishlistButton
+                gameId={gameId}
+                title={game.title}
+                releaseStatus={game.release_status}
+                source={onWishlisted ? "chat" : "site"}
+                onAdded={onWishlisted}
+                className="rounded-md border border-border px-2 py-1 text-xs hover:border-accent hover:text-accent"
+              />
+            )}
+          </div>
           <PricePanel gameId={gameId} onStoreClick={onStoreClick} />
         </section>
       </div>
