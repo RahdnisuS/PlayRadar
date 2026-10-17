@@ -199,6 +199,9 @@ function EmailPrefs({ digest: initialDigest, freeGames: initialFree }: { digest:
         {status === "saving" ? "Saving…" : status === "saved" ? "Saved." : status === "error" ? "Couldn't save. Please try again." : ""}
       </p>
       <p className="text-xs text-muted">Every email also has a one-click unsubscribe link.</p>
+      <p className="text-xs text-muted">
+        Using Gmail? Alert emails may land in the Promotions tab. Drag one to Primary to keep them there.
+      </p>
     </section>
   );
 }
