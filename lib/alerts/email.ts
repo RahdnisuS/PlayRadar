@@ -3,7 +3,7 @@
 import { formatPrice } from "../format";
 import { REGIONS } from "../regions";
 
-export type AlertKind = "sale" | "all_time_low" | "target_hit" | "released";
+export type AlertKind = "sale" | "all_time_low" | "target_hit" | "released" | "free_to_claim";
 
 export type EmailItem = {
   title: string;
@@ -20,16 +20,20 @@ export type EmailItem = {
   targetCurrency: string | null;
 };
 
-export type EmailContext = { siteUrl: string; unsubscribeUrl: string; country: string; digest: "instant" | "daily" | "weekly" };
+export type EmailContext = { siteUrl: string; unsubscribeUrl: string; country: string; digest: "instant" | "daily" | "weekly" | "off" };
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
+const isFree = (i: EmailItem) => i.kinds.includes("free_to_claim");
+
 function price(i: EmailItem): string | null {
+  if (isFree(i)) return "Free";
   if (i.priceCents == null || !i.currency) return null;
   return i.priceCents === 0 ? "Free" : formatPrice(i.priceCents, i.currency);
 }
 
 function discount(i: EmailItem): number {
+  if (isFree(i)) return 0;
   return i.priceCents != null && i.regularCents ? Math.round(((i.regularCents - i.priceCents) / i.regularCents) * 100) : 0;
 }
 
@@ -39,6 +43,10 @@ function releasedText(i: EmailItem) {
 
 /** One-line headline for an item, e.g. "Hades: ₹550 on Steam (-50%), all-time low". */
 function headline(i: EmailItem): string {
+  if (isFree(i)) {
+    const usual = i.regularCents && i.currency ? ` (usually ${formatPrice(i.regularCents, i.currency)})` : "";
+    return `${i.title} is free to keep on Epic${i.saleEndsAt ? ` until ${dateFmt(i.saleEndsAt)}` : ""}${usual}`;
+  }
   const p = price(i);
   const where = p ? `${p}${i.storeName ? ` on ${i.storeName}` : ""}` : null;
   if (i.kinds.includes("released") && i.kinds.length === 1) return `${i.title} ${releasedText(i)}${where ? `: ${where}` : ""}`;
@@ -54,6 +62,7 @@ export function subject(items: EmailItem[], digest: EmailContext["digest"]): str
   if (items.length === 1) return headline(items[0]);
   const shown = items.slice(0, 2).map((i) => `${i.title} ${price(i) ?? ""}`.trim());
   const more = items.length > 2 ? ` + ${items.length - 2} more` : "";
+  if (items.every(isFree)) return `Free on Epic: ${items.slice(0, 2).map((i) => i.title).join(", ")}${more}`;
   const prefix = digest === "daily" ? "Today on your wishlist" : digest === "weekly" ? "This week on your wishlist" : "Wishlist alerts";
   return `${prefix}: ${shown.join(", ")}${more}`;
 }
@@ -61,6 +70,7 @@ export function subject(items: EmailItem[], digest: EmailContext["digest"]): str
 function badges(i: EmailItem): string[] {
   const d = discount(i);
   return [
+    isFree(i) ? "Free to keep" : null,
     i.kinds.includes("released") ? (i.releaseStatus === "early_access" ? "Early access now" : "Out now") : null,
     d > 0 ? `-${d}%` : null,
     i.kinds.includes("all_time_low") ? "All-time low" : null,
@@ -80,17 +90,19 @@ function itemHtml(i: EmailItem): string {
     : "";
   const priceLine = p
     ? `<span style="font-size:20px;font-weight:700;color:#0b0d12">${esc(p)}</span>` +
-      (d > 0 && i.regularCents && i.currency
+      ((d > 0 || isFree(i)) && i.regularCents && i.currency
         ? ` <span style="color:#6b7280;text-decoration:line-through">${esc(formatPrice(i.regularCents, i.currency))}</span>`
         : "") +
       (i.storeName ? ` <span style="color:#374151">on ${esc(i.storeName)}</span>` : "")
     : `<span style="color:#6b7280">No price in your region yet</span>`;
-  const ends = i.saleEndsAt ? `<div style="color:#6b7280;font-size:12px;margin-top:2px">Sale ends ${esc(dateFmt(i.saleEndsAt))}</div>` : "";
+  const ends = i.saleEndsAt
+    ? `<div style="color:#6b7280;font-size:12px;margin-top:2px">${isFree(i) ? "Claim by" : "Sale ends"} ${esc(dateFmt(i.saleEndsAt))}</div>`
+    : "";
   const tagHtml = badges(i)
     .map((b) => `<span style="display:inline-block;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;margin:0 4px 4px 0;font-size:12px">${esc(b)}</span>`)
     .join("");
   const button = i.storeUrl
-    ? `<a href="${esc(i.storeUrl)}" style="display:inline-block;margin-top:8px;background:#0f766e;color:#ffffff;text-decoration:none;border-radius:6px;padding:6px 12px;font-size:13px">View on ${esc(i.storeName ?? "the store")}</a>`
+    ? `<a href="${esc(i.storeUrl)}" style="display:inline-block;margin-top:8px;background:#0f766e;color:#ffffff;text-decoration:none;border-radius:6px;padding:6px 12px;font-size:13px">${isFree(i) ? "Claim" : "View"} on ${esc(i.storeName ?? "the store")}</a>`
     : "";
   return `<tr><td style="padding:12px 0;border-bottom:1px solid #e5e7eb">
   <table role="presentation" cellpadding="0" cellspacing="0"><tr>
@@ -107,7 +119,7 @@ function itemHtml(i: EmailItem): string {
 
 function itemText(i: EmailItem): string {
   const lines = [headline(i)];
-  if (i.saleEndsAt) lines.push(`  Sale ends ${dateFmt(i.saleEndsAt)}`);
+  if (i.saleEndsAt && !isFree(i)) lines.push(`  Sale ends ${dateFmt(i.saleEndsAt)}`);
   if (i.storeUrl) lines.push(`  ${i.storeUrl}`);
   return lines.join("\n");
 }
@@ -115,11 +127,19 @@ function itemText(i: EmailItem): string {
 export function renderEmail(items: EmailItem[], ctx: EmailContext): { subject: string; html: string; text: string } {
   const region = REGIONS.find((r) => r.code === ctx.country)?.label ?? ctx.country;
   const manage = `${ctx.siteUrl}/wishlist`;
+  const free = items.filter(isFree).length;
+  const wished = items.length - free;
   const intro =
-    items.length === 1
-      ? "A game on your PlayRadar wishlist has news:"
-      : `${items.length} games on your PlayRadar wishlist have news:`;
-  const footer = `You're getting this because you wishlisted these games on PlayRadar and asked for email alerts. Prices are for ${region} and can change at any time, so check the store before you buy. PlayRadar doesn't sell games and isn't affiliated with Steam or Epic.`;
+    wished === 0
+      ? free === 1 ? "Epic is giving this game away for a limited time:" : "Epic is giving these games away for a limited time:"
+      : free > 0
+        ? "News from PlayRadar: games on your wishlist, plus free games on Epic:"
+        : wished === 1 ? "A game on your PlayRadar wishlist has news:" : `${wished} games on your PlayRadar wishlist have news:`;
+  const why = [
+    wished ? "you wishlisted these games on PlayRadar and asked for email alerts" : null,
+    free ? "you asked PlayRadar to tell you when Epic gives a game away" : null,
+  ].filter(Boolean).join(", and ");
+  const footer = `You're getting this because ${why}. Prices are for ${region} and can change at any time, so check the store before you buy. PlayRadar doesn't sell games and isn't affiliated with Steam or Epic.`;
 
   const html = `<!doctype html><html><body style="margin:0;background:#f3f4f6;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px"><tr><td align="center">

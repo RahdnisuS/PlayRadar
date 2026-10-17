@@ -128,3 +128,22 @@ export async function queueAlerts(opts: { dry?: boolean } = {}): Promise<{ price
   );
   return { price, released: released.length, found };
 }
+
+/**
+ * Queues one free_to_claim alert per running Epic giveaway for every user with free-game alerts on. Independent of
+ * the wishlist digest setting: a giveaway lasts about a week, too short for a weekly digest. Giveaways ending within
+ * two hours are not worth an email.
+ */
+export async function queueFreeGameAlerts(): Promise<number> {
+  const rows = await q(
+    `INSERT INTO notifications (user_id, game_id, promo_id, type, dedupe_key)
+     SELECT u.id, fp.game_id, fp.id, 'free_to_claim', 'free:' || fp.id
+     FROM free_promotions fp
+     CROSS JOIN users u
+     WHERE u.email_verified AND u.free_game_alerts
+       AND fp.starts_at <= now() AND fp.ends_at > now() + interval '2 hours'
+     ON CONFLICT (user_id, dedupe_key) DO NOTHING
+     RETURNING 1`,
+  );
+  return rows.length;
+}

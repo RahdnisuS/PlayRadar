@@ -1,0 +1,41 @@
+name: Epic free games
+# Daily at 16:40 UTC (22:10 India): Epic swaps giveaways at 15:00 UTC on Thursdays (daily at 16:00 UTC in December).
+# Adds missing games to the catalog, queues free-game alerts and sends them, then mood-tags and embeds new games
+# so they also show up in chat. A missing Groq key only skips those last two steps.
+on:
+  schedule:
+    - cron: "40 16 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: db-jobs
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
+      TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+      TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+      BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      EMAIL_FROM_NAME: PlayRadar
+      NEXT_PUBLIC_SITE_URL: https://play-radar-ten.vercel.app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/jobs/epic-free.ts
+      - run: npx tsx scripts/jobs/alerts.ts
+      - id: mood
+        run: npx tsx scripts/mood-tags.ts --limit 50
+        continue-on-error: true
+      - run: npx tsx scripts/embed-catalog.ts
+        if: ${{ steps.mood.outcome == 'success' }}

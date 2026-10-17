@@ -20,7 +20,9 @@ type QueuedRow = {
   email: string;
   unsubscribe_token: string;
   country_code: string;
-  email_digest: Digest;
+  email_digest: Digest | "off";
+  free_game_alerts: boolean;
+  promo_ends_at: Date | null;
   title: string;
   cover_url: string | null;
   release_status: string;
@@ -38,6 +40,7 @@ type ListingRow = {
   listing_id: string;
   game_id: string;
   country_code: string;
+  store_code: string;
   store_name: string;
   store_url: string;
   lowest_cents: number | null;
@@ -58,17 +61,21 @@ export type SendResult = { emails: number; sent: number; dropped: number; leftQu
 
 export async function sendQueuedAlerts(digests: Digest[], opts: { dry?: boolean; siteUrl: string; preview?: (to: string, html: string) => void }): Promise<SendResult> {
   if (!opts.dry) {
-    // Paused / unverified users and very old alerts are never sent.
+    // Paused / unverified users and very old alerts are never sent. Free-game alerts have their own switch.
     await q(
       `UPDATE notifications n SET status = 'failed' FROM users u
        WHERE n.user_id = u.id AND n.status = 'queued'
-         AND (u.email_digest = 'off' OR NOT u.email_verified OR n.created_at < now() - make_interval(days => $1))`,
+         AND (NOT u.email_verified OR n.created_at < now() - make_interval(days => $1)
+              OR (n.type <> 'free_to_claim' AND u.email_digest = 'off')
+              OR (n.type = 'free_to_claim' AND NOT u.free_game_alerts))`,
       [MAX_QUEUE_DAYS],
     );
   }
 
+  // Free-game alerts go out on every run, whatever the digest setting: a giveaway only lasts about a week.
   const rows = await q<QueuedRow>(
     `SELECT n.id, n.user_id, n.game_id, n.type, u.email, u.unsubscribe_token, trim(u.country_code) AS country_code, u.email_digest,
+            u.free_game_alerts, fp.ends_at AS promo_ends_at,
             g.title, g.cover_url, g.release_status,
             w.user_id IS NOT NULL AS on_list, w.added_at, w.target_price_cents, trim(w.target_currency) AS target_currency,
             w.alert_on_any_sale, w.alert_on_all_time_low,
@@ -78,8 +85,9 @@ export async function sendQueuedAlerts(digests: Digest[], opts: { dry?: boolean;
      JOIN games g ON g.id = n.game_id
      LEFT JOIN wishlist_items w ON w.user_id = n.user_id AND w.game_id = n.game_id
      LEFT JOIN price_snapshots sn ON sn.id = n.snapshot_id
-     WHERE n.status = 'queued' AND n.type <> 'free_to_claim'
-       AND u.email_verified AND u.email_digest = ANY($1::text[])
+     LEFT JOIN free_promotions fp ON fp.id = n.promo_id
+     WHERE n.status = 'queued' AND u.email_verified
+       AND (u.email_digest = ANY($1::text[]) OR n.type = 'free_to_claim')
      ORDER BY n.created_at`,
     [digests],
   );
@@ -89,7 +97,7 @@ export async function sendQueuedAlerts(digests: Digest[], opts: { dry?: boolean;
   // Current prices for every game involved, in each user's region.
   const pairs = [...new Set(rows.map((r) => `${r.game_id}|${r.country_code}`))].map((k) => k.split("|"));
   const listings = await q<ListingRow>(
-    `SELECT sl.id AS listing_id, sl.game_id, k.country_code, s.name AS store_name, sl.store_url, ps.lowest_cents,
+    `SELECT sl.id AS listing_id, sl.game_id, k.country_code, s.code AS store_code, s.name AS store_name, sl.store_url, ps.lowest_cents,
             last.id AS snap_id, last.currency, last.price_cents, last.regular_cents, last.sale_ends_at, last.captured_at
      FROM unnest($1::bigint[], $2::text[]) AS k(game_id, country_code)
      JOIN store_listings sl ON sl.game_id = k.game_id
@@ -109,12 +117,16 @@ export async function sendQueuedAlerts(digests: Digest[], opts: { dry?: boolean;
   const drop: string[] = [];
   // user -> item key -> item + the notifications it covers (with the snapshot shown)
   type Entry = { item: EmailItem; ids: { id: string; snap: string | null }[] };
-  const perUser = new Map<string, { email: string; token: string; country: string; digest: Digest; entries: Map<string, Entry> }>();
+  const perUser = new Map<string, { email: string; token: string; country: string; digest: Digest | "off"; entries: Map<string, Entry> }>();
 
   for (const r of rows) {
     let listing: ListingRow | undefined;
     let valid = r.on_list;
-    if (valid && r.type !== "released") {
+    if (r.type === "free_to_claim") {
+      // Not about the wishlist: still running and still wanted. Shown with the Epic listing's regular price.
+      valid = r.free_game_alerts && !!r.promo_ends_at && r.promo_ends_at > new Date();
+      listing = listings.find((l) => String(l.game_id) === String(r.game_id) && l.country_code === r.country_code && l.store_code === "epic");
+    } else if (valid && r.type !== "released") {
       // A price alert is about one store listing in one region; a region change since queuing makes it moot.
       listing = r.snap_country === r.country_code ? byListing.get(listingKey(r.snap_listing!, r.country_code)) : undefined;
       const flagOn = r.type === "sale" ? r.alert_on_any_sale : r.type === "all_time_low" ? r.alert_on_all_time_low : true;
@@ -145,8 +157,11 @@ export async function sendQueuedAlerts(digests: Digest[], opts: { dry?: boolean;
       perUser.set(r.user_id, { email: r.email, token: r.unsubscribe_token, country: r.country_code, digest: r.email_digest, entries: new Map() });
     }
     const u = perUser.get(r.user_id)!;
-    const key = `${r.game_id}|${listing?.listing_id ?? "none"}`;
+    const free = r.type === "free_to_claim";
+    const key = `${free ? "free" : r.game_id}|${free ? r.game_id : listing?.listing_id ?? "none"}`;
     const snap = latestSnap(listing);
+    // The giveaway price is 0 whatever the last snapshot says; the regular price shows what it's worth.
+    const regular = free ? (snap && snap.regularCents > 0 ? snap.regularCents : null) : snap?.regularCents ?? null;
     if (!u.entries.has(key)) {
       u.entries.set(key, {
         item: {
@@ -156,10 +171,12 @@ export async function sendQueuedAlerts(digests: Digest[], opts: { dry?: boolean;
           releaseStatus: r.release_status,
           storeName: listing?.store_name ?? null,
           storeUrl: listing?.store_url ?? null,
-          priceCents: snap?.priceCents ?? null,
-          regularCents: snap?.regularCents ?? null,
-          currency: snap?.currency ?? null,
-          saleEndsAt: listing?.sale_ends_at && listing.sale_ends_at > new Date() ? listing.sale_ends_at : null,
+          priceCents: free ? 0 : snap?.priceCents ?? null,
+          regularCents: regular,
+          currency: free && regular == null ? null : snap?.currency ?? null,
+          saleEndsAt: free
+            ? r.promo_ends_at
+            : listing?.sale_ends_at && listing.sale_ends_at > new Date() ? listing.sale_ends_at : null,
           targetCents: r.target_price_cents,
           targetCurrency: r.target_currency,
         },
@@ -168,7 +185,7 @@ export async function sendQueuedAlerts(digests: Digest[], opts: { dry?: boolean;
     }
     const e = u.entries.get(key)!;
     if (!e.item.kinds.includes(r.type)) e.item.kinds.push(r.type);
-    e.ids.push({ id: r.id, snap: r.type === "released" ? null : snap?.id ?? null });
+    e.ids.push({ id: r.id, snap: r.type === "released" || free ? null : snap?.id ?? null });
   }
 
   if (drop.length && !opts.dry) await q(`UPDATE notifications SET status = 'failed' WHERE id = ANY($1::bigint[])`, [drop]);

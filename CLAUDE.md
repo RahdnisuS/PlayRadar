@@ -21,6 +21,7 @@ npx tsx scripts/check-fallback.ts       # keyword fallback parser cases
 npx tsx scripts/check-video-rules.ts    # video title / spoiler / sequel rules
 npx tsx scripts/check-hint.ts           # wait-or-buy hint rules
 npx tsx scripts/check-alerts.ts         # wishlist alert episode rules
+npx tsx scripts/check-epic-free.ts      # Epic giveaway feed parsing + free-game email wording
 
 # Offline scripts / jobs (tsx, load .env.local via scripts/env.ts)
 npx tsx scripts/seed-igdb.ts [--released 1700] [--upcoming 300]   # catalog seed + ITAD id resolution (re-runnable, upserts)
@@ -28,6 +29,7 @@ npx tsx scripts/jobs/refresh-catalog-prices.ts [--country XX] [--report-unsold] 
 npx tsx scripts/jobs/poll-wishlist-prices.ts                      # prices for wishlisted games in each user's region (every 4h)
 npx tsx scripts/jobs/refresh-releases.ts [--dry]                  # IGDB status/dates for upcoming + early-access games (daily)
 npx tsx scripts/jobs/alerts.ts [--digest] [--dry [--preview DIR]] # queue + email wishlist alerts; --digest adds daily (+weekly on Mondays)
+npx tsx scripts/jobs/epic-free.ts [--dry]                         # Epic giveaways -> catalog (adds missing games) + free_promotions + queue free_to_claim
 npx tsx scripts/rescue-editions.ts [--dry]                        # repoint delisted Steam originals to the edition Steam sells
 npx tsx scripts/dedupe-editions.ts [--dry]                        # delete unpriced games whose sellable edition is already in catalog
 npx tsx scripts/add-epic-listings.ts [--dry]                      # add Epic listings IGDB missed (via ITAD deal links); additive
@@ -140,7 +142,7 @@ The work follows a 14-day plan, and the live site is https://play-radar-ten.verc
 | 6–7 | Video selection and spoiler filtering | Done. No scheduled backfill or re-check job yet |
 | 8–9 | Region dropdown (header, `pr_region` cookie via `POST /api/region`; the home page renders per request), Buy popup (`BuyDialog.tsx`) comparing Steam and Epic cheapest-first, all-time-low badge, Recharts 3 history chart (lazy-loaded), wait-or-buy hint | Done |
 | 10–11 | Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Done 2026-10-17 (first scheduled runs still to be watched). See **Next session** below |
-| 12 | Epic free-games alerts (`epic-free.yml`, Epic `freeGamesPromotions` feed). The feedback loop already exists | Partly done |
+| 12 | Epic free-games alerts (`epic-free.yml`, Epic `freeGamesPromotions` feed). The feedback loop already exists | Done 2026-10-17. See **Epic free games** below |
 | 13 | 50-game hand-labelled video set (`video_eval_labels`), `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy), responsive polish, fuller legal pages | Not started |
 | 14 | Buffer, README with screenshots and results | Not started |
 
@@ -161,7 +163,7 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SIT
 - `email.ts`: price-first subject and body, store button (https URL), footer with reason, manage link and unsubscribe; no postal address. Headers `List-Unsubscribe` + `List-Unsubscribe-Post` (RFC 8058) → `POST /api/unsubscribe?token=`. The footer link opens `/unsubscribe?token=` with one button (GET never unsubscribes, so link scanners can't). Unsubscribe sets `email_digest='off'`, `free_game_alerts=false`.
 - Instant = one combined email per 4h check; daily digest 03:30 UTC (09:00 IST); weekly on Mondays.
 - `refresh-releases.ts`: IGDB marks planned early-access launches as status EA, so early access needs a past EA date (or past release date); a release date ≥ 60 days after the EA start counts as the full release.
-- GitHub Actions (all in concurrency group `db-jobs`): `prices.yml` (every 4h at :17: poll + alerts), `daily.yml` (21:30 UTC: catalog prices, releases, alerts; 300-min timeout because the runner is in the US and the DB in Mumbai, so watch the first run's duration), `digests.yml` (03:30 UTC). Repo secrets: `DATABASE_URL`, `ITAD_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BREVO_API_KEY`, `EMAIL_FROM`; the sender name and site URL are plain env in the workflow files.
+- GitHub Actions (all in concurrency group `db-jobs`): `prices.yml` (every 4h at :17: poll + alerts), `daily.yml` (21:30 UTC: catalog prices, releases, alerts; 300-min timeout because the runner is in the US and the DB in Mumbai, so watch the first run's duration), `digests.yml` (03:30 UTC), `epic-free.yml` (16:40 UTC). Repo secrets: `DATABASE_URL`, `ITAD_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BREVO_API_KEY`, `EMAIL_FROM`, `GROQ_API_KEY` (epic-free only); the sender name and site URL are plain env in the workflow files.
 
 **Verified 2026-10-17:**
 - `prices.yml` run by hand (Actions → Wishlist prices → Run workflow): green. All workflows now use `actions/checkout@v5` and `actions/setup-node@v5` (Node 20 deprecation warning). The "ubuntu-latest moves to Ubuntu 26 from 2026-10-19" notice needs no action.
@@ -169,9 +171,15 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SIT
 - Brevo **click tracking is on**: links in our emails (store buttons, sign-in links) go through a Brevo redirect. Everything works; the user may switch it off in Brevo's transactional settings (offered, not done).
 - `gh` (GitHub CLI) is not installed here, so the user starts workflows by hand from the Actions tab.
 
+**Epic free games (done 2026-10-17):**
+- `lib/epic/freeGames.ts` reads Epic's public `freeGamesPromotions` feed (country=US, no key). A giveaway is a promotional offer with `discountPercentage === 0` (Epic stores the multiplier, so 0 = 100% off); other offers are ordinary sales. Only BASE_GAME / BUNDLE / EDITION, no "Mystery Game" placeholders. Page slug from the `productHome` mapping (`urlSlug` is often a bare hex offer id). Current **and** upcoming giveaways go into `free_promotions`.
+- **Catalog policy (user decision 2026-10-17): giveaway games missing from the catalog are added.** `lib/catalog/freeGames.ts` matches our Epic slug, then IGDB (`external_games` uid = Epic offer id, or the store URL; then exact title), then an existing igdb_id / itad_id / Steam appid (adds the Epic listing to that game). Otherwise it saves the IGDB game with `popularity 0` via `saveIgdbGame` (`lib/igdb/catalog.ts`, now shared with `seed-igdb.ts`), or, unknown to IGDB, a basic row from Epic's data (slug `epic-<slug>`, no tags). New games are priced in all 4 regions right away. First run added Sker Ritual, Bad Cheese, Agent A, Home (ids 2001-2004).
+- `queueFreeGameAlerts()` (`lib/alerts/queue.ts`): one `free_to_claim` per running giveaway (ends > now + 2h) per verified user with `free_game_alerts`, dedupe `free:<promo_id>`. **Independent of `email_digest`**: sent on every alerts run (a giveaway lasts a week), even for digest `off`; dropped when the giveaway ended or the toggle went off. The email shows "Free", the Epic regular price struck through, "Claim by", a "Claim on Epic Games Store" button, and a footer naming the free-games reason.
+- `epic-free.yml` daily 16:40 UTC: epic-free → alerts → `mood-tags --limit 50` (continue-on-error) → `embed-catalog` only if moods succeeded. Needs repo secret `GROQ_API_KEY` for the last two steps.
+
 **Still to do, in order** (the user starts the next session later on 2026-10-17):
 1. Once it has happened, check the first scheduled `daily.yml` run (2026-10-17 21:30 UTC = 2026-10-18 03:00 IST) in the Actions tab: success and duration. If resuming before then, skip to item 2 and come back to this. If slow, batch the per-listing queries in `lib/prices/service.ts` (`insertSnapshotIfChanged` / `refreshSummary` / `markFetched` are three round trips per listing, from a US runner to the Mumbai DB). Also glance at the first `digests.yml` run (03:30 UTC).
-2. **Day 12:** Epic free-games alerts. A job (`epic-free.yml` + `scripts/jobs/…`) reads Epic's `freeGamesPromotions` feed, fills `free_promotions`, queues `free_to_claim` notifications for users with `free_game_alerts` on (`promo_id` set), and `send.ts` must stop skipping `free_to_claim`. Games not in our catalog need deciding (ask the user: add them, or skip).
+2. **Day 12: done** (see **Epic free games** below). Watch the first scheduled `epic-free.yml` run (16:40 UTC) once `GROQ_API_KEY` is a repo secret.
 3. **Day 13:**
    - 50-game hand-labelled video set (`video_eval_labels`; the user judges the videos);
    - a `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy);
