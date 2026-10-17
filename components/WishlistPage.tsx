@@ -13,9 +13,9 @@ import { SAVED_HERE_ONLY, WishlistDialog } from "./WishlistDialog";
 type Digest = NonNullable<Me["user"]>["emailDigest"];
 
 const DIGESTS: { value: Digest; label: string }[] = [
-  { value: "instant", label: "Right away, one email per alert" },
-  { value: "daily", label: "Once a day, in one email" },
-  { value: "weekly", label: "Once a week, in one email" },
+  { value: "instant", label: "As soon as we spot them (we check every 4 hours)" },
+  { value: "daily", label: "Once a day, in one email (around 9:00 India time)" },
+  { value: "weekly", label: "Once a week, on Mondays (sales that end sooner are skipped)" },
   { value: "off", label: "Never (pause all wishlist emails)" },
 ];
 

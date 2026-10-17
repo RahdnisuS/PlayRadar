@@ -20,10 +20,14 @@ npx tsc --noEmit       # typecheck (CI runs lint + this)
 npx tsx scripts/check-fallback.ts       # keyword fallback parser cases
 npx tsx scripts/check-video-rules.ts    # video title / spoiler / sequel rules
 npx tsx scripts/check-hint.ts           # wait-or-buy hint rules
+npx tsx scripts/check-alerts.ts         # wishlist alert episode rules
 
 # Offline scripts / jobs (tsx, load .env.local via scripts/env.ts)
 npx tsx scripts/seed-igdb.ts [--released 1700] [--upcoming 300]   # catalog seed + ITAD id resolution (re-runnable, upserts)
 npx tsx scripts/jobs/refresh-catalog-prices.ts [--country XX] [--report-unsold]  # prices for whole catalog in all 4 regions; report lists unpriced games
+npx tsx scripts/jobs/poll-wishlist-prices.ts                      # prices for wishlisted games in each user's region (every 4h)
+npx tsx scripts/jobs/refresh-releases.ts [--dry]                  # IGDB status/dates for upcoming + early-access games (daily)
+npx tsx scripts/jobs/alerts.ts [--digest] [--dry [--preview DIR]] # queue + email wishlist alerts; --digest adds daily (+weekly on Mondays)
 npx tsx scripts/rescue-editions.ts [--dry]                        # repoint delisted Steam originals to the edition Steam sells
 npx tsx scripts/dedupe-editions.ts [--dry]                        # delete unpriced games whose sellable edition is already in catalog
 npx tsx scripts/add-epic-listings.ts [--dry]                      # add Epic listings IGDB missed (via ITAD deal links); additive
@@ -135,14 +139,14 @@ The work follows a 14-day plan, and the live site is https://play-radar-ten.verc
 | 3–5 | Chat, filters, retrieval, caps, cache, fallback | Done |
 | 6–7 | Video selection and spoiler filtering | Done. No scheduled backfill or re-check job yet |
 | 8–9 | Region dropdown (header, `pr_region` cookie via `POST /api/region`; the home page renders per request), Buy popup (`BuyDialog.tsx`) comparing Steam and Epic cheapest-first, all-time-low badge, Recharts 3 history chart (lazy-loaded), wait-or-buy hint | Done |
-| 10–11 | **In progress.** Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Login + wishlist UI done (2026-10-17). Alert emails, digests and Actions not started. See **Next session** below |
+| 10–11 | Supabase magic-link auth via Brevo SMTP, wishlist (target price + any-sale / ATL / release toggles), alert emails with deduplication and a daily cap, instant/daily/weekly/off digests, GitHub Actions jobs (`prices.yml` every 4h, `daily.yml`, `digests.yml`) | Done 2026-10-17 (first scheduled runs still to be watched). See **Next session** below |
 | 12 | Epic free-games alerts (`epic-free.yml`, Epic `freeGamesPromotions` feed). The feedback loop already exists | Partly done |
 | 13 | 50-game hand-labelled video set (`video_eval_labels`), `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy), responsive polish, fuller legal pages | Not started |
 | 14 | Buffer, README with screenshots and results | Not started |
 
 Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SITE_URL=https://play-radar-ten.vercel.app` (plain Config; a `NEXT_PUBLIC_` variable can't be Sensitive).
 
-### Next session (stopped 2026-10-17, Day 11)
+### Next session (stopped 2026-10-17, end of Day 11)
 **Login + wishlist (done and pushed 2026-10-17):**
 - Auth: `middleware.ts` refreshes the Supabase session only when an `sb-` cookie exists. `POST /api/auth/login` `{email, next}` sends the magic link (5/IP/h, 3/email/h, 80/day global, since auth shares Brevo's 300/day). `GET /auth/confirm` verifies `token_hash`, sets `users.email_verified`, moves the guest's `chat_sessions` to the user, copies a valid `pr_region` cookie into `users.country_code` (or, with no cookie, sets the cookie from the account). Failures redirect to `/?signin=expired|invalid`, which `AuthButton` turns into a message. `safeNext()` prevents open redirects. `POST /api/auth/logout`, `GET /api/me`.
 - Supabase **Magic Link** and **Confirm signup** templates now link to `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email` with PlayRadar wording, no postal address.
@@ -151,12 +155,18 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SIT
 - A target set in another region's currency is kept as-is; the alerts job must compare it only against prices in `target_currency`.
 - Testing sign-in without sending email: `supabase.auth.admin.generateLink({type:"magiclink", email})` with the service role key gives `properties.hashed_token`; open `/auth/confirm?token_hash=<it>&next=/wishlist` with a cookie jar.
 
-**Still to build (chunk 2):**
-1. Alerts job comparing changed snapshots against wishlists (types sale / all_time_low / target_hit / released, `notifications` dedupe, `try_consume_email` cap of about 200).
-2. Brevo API emails showing the actual price, with an unsubscribe route using `users.unsubscribe_token`.
-3. Digests (daily / weekly per `users.email_digest`).
-4. GitHub Actions (`prices.yml` every 4h, `daily.yml`, `digests.yml`). Repo secrets needed: `DATABASE_URL`, `ITAD_API_KEY`, `BREVO_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`, `GROQ_API_KEY`, `YOUTUBE_API_KEY` and others as the scripts require. Walk the user through adding them.
-5. The privacy page promises account deletion from a settings page; that doesn't exist yet (ask before building).
+**Alerts + digests (done 2026-10-17, `lib/alerts/`, `lib/email/brevo.ts`):**
+- State-based, independent of who refreshed prices. `rules.ts` (pure, checked by `check-alerts.ts`): an alert's *episode* is the trailing run of snapshots where its condition holds (on sale / at or below `price_summary.lowest_cents` while on sale, needing the history backfill / at or below the target in `target_currency`). The dedupe key holds the episode's first snapshot id, and only episodes that started after `wishlist_items.added_at` alert (so no mail about a sale already running when the game was added). Released: `release_date` (or `early_access_date` for early access) between `added_at` and today.
+- `queue.ts` inserts into `notifications` (snapshot_id = latest). `send.ts` re-checks each queued alert (sale ended / flag turned off / region changed / item removed → status `failed`, meaning dropped), groups one email per user per run (max 20 items), shows the latest price, `try_consume_email(200)`, then marks `sent`. Queued > 14 days or users paused/unverified → `failed`. Brevo 400 = permanent failure; other errors stay queued.
+- `email.ts`: price-first subject and body, store button (https URL), footer with reason, manage link and unsubscribe; no postal address. Headers `List-Unsubscribe` + `List-Unsubscribe-Post` (RFC 8058) → `POST /api/unsubscribe?token=`. The footer link opens `/unsubscribe?token=` with one button (GET never unsubscribes, so link scanners can't). Unsubscribe sets `email_digest='off'`, `free_game_alerts=false`.
+- Instant = one combined email per 4h check; daily digest 03:30 UTC (09:00 IST); weekly on Mondays.
+- `refresh-releases.ts`: IGDB marks planned early-access launches as status EA, so early access needs a past EA date (or past release date); a release date ≥ 60 days after the EA start counts as the full release.
+- GitHub Actions (all in concurrency group `db-jobs`): `prices.yml` (every 4h at :17: poll + alerts), `daily.yml` (21:30 UTC: catalog prices, releases, alerts; 300-min timeout because the runner is in the US and the DB in Mumbai, so watch the first run's duration), `digests.yml` (03:30 UTC). Repo secrets: `DATABASE_URL`, `ITAD_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BREVO_API_KEY`, `EMAIL_FROM`; the sender name and site URL are plain env in the workflow files.
+
+**Still to do:**
+1. Watch the first scheduled runs (especially `daily.yml` duration; batch the per-listing queries in `service.ts` if it's slow).
+2. Day 12: Epic free-games alerts (`epic-free.yml`, `free_promotions`, `free_to_claim` notifications, `users.free_game_alerts`). `send.ts` currently skips `free_to_claim`.
+3. The privacy page promises account deletion from a settings page; that doesn't exist yet (ask before building).
 
 **Other leftovers:**
 - Mood redo v2 still has to run for the remaining ~1,000 less popular games (`mood-tags.ts --redo`, then `embed-catalog.ts --all`, then clear `chat_cache`).
