@@ -148,7 +148,7 @@ The work follows a 14-day plan, and the live site is https://play-radar-ten.verc
 
 Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SITE_URL=https://play-radar-ten.vercel.app` (plain Config; a `NEXT_PUBLIC_` variable can't be Sensitive).
 
-### Next session (stopped 2026-10-17, end of Day 11; resume with item 1 of "Still to do")
+### Next session (stopped 2026-10-17, end of Day 12; resume with items 1 and 2 of "Still to do")
 **Login + wishlist (done and pushed 2026-10-17):**
 - Auth: `middleware.ts` refreshes the Supabase session only when an `sb-` cookie exists. `POST /api/auth/login` `{email, next}` sends the magic link (5/IP/h, 3/email/h, 80/day global, since auth shares Brevo's 300/day). `GET /auth/confirm` verifies `token_hash`, sets `users.email_verified`, moves the guest's `chat_sessions` to the user, copies a valid `pr_region` cookie into `users.country_code` (or, with no cookie, sets the cookie from the account). Failures redirect to `/?signin=expired|invalid`, which `AuthButton` turns into a message. `safeNext()` prevents open redirects. `POST /api/auth/logout`, `GET /api/me`.
 - Supabase **Magic Link** and **Confirm signup** templates now link to `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email` with PlayRadar wording, no postal address.
@@ -179,7 +179,7 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SIT
 
 **Still to do, in order** (the user starts the next session later on 2026-10-17):
 1. Once it has happened, check the first scheduled `daily.yml` run (2026-10-17 21:30 UTC = 2026-10-18 03:00 IST) in the Actions tab: success and duration. If resuming before then, skip to item 2 and come back to this. If slow, batch the per-listing queries in `lib/prices/service.ts` (`insertSnapshotIfChanged` / `refreshSummary` / `markFetched` are three round trips per listing, from a US runner to the Mumbai DB). Also glance at the first `digests.yml` run (03:30 UTC).
-2. **Day 12: done** (see **Epic free games** below), committed locally but **not pushed yet** (ask the user, then push). The `GROQ_API_KEY` repo secret was added 2026-10-17. After pushing: the user ticks the free-games box on `/wishlist`, then watch the first `epic-free.yml` run (16:40 UTC, or run it by hand from the Actions tab) and confirm the free-game email arrives (Bad Cheese / Agent A are free until 2026-10-22 15:00 UTC).
+2. **Day 12: done and pushed 2026-10-17** (see **Epic free games** below). The `GROQ_API_KEY` repo secret is added. Still to verify: the user ticks the free-games box on `/wishlist`, runs `epic-free.yml` by hand (Actions → Epic free games → Run workflow) or waits for 16:40 UTC, and the free-game email arrives (Bad Cheese / Agent A are free until 2026-10-22 15:00 UTC; may land in Gmail Promotions). Check the run log: mood-tags and embed-catalog steps should be green.
 3. **Day 13:**
    - 50-game hand-labelled video set (`video_eval_labels`; the user judges the videos);
    - a `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy);
