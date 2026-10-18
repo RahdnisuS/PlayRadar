@@ -80,6 +80,8 @@ export function WishlistPage() {
 
       <EmailPrefs digest={me.emailDigest} freeGames={me.freeGameAlerts} />
 
+      <DeleteAccount email={me.email} />
+
       {editing && (
         <WishlistDialog
           gameId={editing.gameId}
@@ -202,6 +204,65 @@ function EmailPrefs({ digest: initialDigest, freeGames: initialFree }: { digest:
       <p className="text-xs text-muted">
         Using Gmail? Alert emails may land in the Promotions tab. Drag one to Primary to keep them there.
       </p>
+    </section>
+  );
+}
+
+function DeleteAccount({ email }: { email: string }) {
+  const [step, setStep] = useState<"idle" | "confirm" | "deleting" | "error">("idle");
+
+  async function remove() {
+    setStep("deleting");
+    try {
+      const r = await fetch("/api/account", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "delete" }),
+      });
+      if (!r.ok) throw new Error();
+      window.location.href = "/";
+    } catch {
+      setStep("error");
+    }
+  }
+
+  return (
+    <section className="max-w-xl space-y-3 rounded-xl border border-border bg-surface p-4 text-sm">
+      <h2 className="font-semibold">Delete account</h2>
+      <p className="text-xs text-muted">
+        Removes your account ({email}), your wishlist, alert history, chat history and recommendation feedback. This
+        can&apos;t be undone. You can sign up again later with the same email.
+      </p>
+      {step === "idle" && (
+        <button
+          onClick={() => setStep("confirm")}
+          className="rounded-md border border-red-400/50 px-3 py-1.5 text-xs text-red-300 hover:border-red-400 hover:bg-red-400/10"
+        >
+          Delete my account
+        </button>
+      )}
+      {(step === "confirm" || step === "deleting" || step === "error") && (
+        <div className="space-y-2 rounded-md bg-red-400/10 p-3">
+          <p className="text-xs">Delete your account and everything in it?</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={remove}
+              disabled={step === "deleting"}
+              className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-60"
+            >
+              {step === "deleting" ? "Deleting…" : "Yes, delete everything"}
+            </button>
+            <button
+              onClick={() => setStep("idle")}
+              disabled={step === "deleting"}
+              className="rounded-md border border-border px-3 py-1.5 text-xs hover:border-accent hover:text-accent"
+            >
+              Cancel
+            </button>
+          </div>
+          {step === "error" && <p className="text-xs text-red-400">Couldn&apos;t delete your account. Please try again.</p>}
+        </div>
+      )}
     </section>
   );
 }

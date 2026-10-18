@@ -87,20 +87,20 @@ export function GameSearch() {
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           maxLength={80}
-          placeholder="Search a game…"
+          placeholder="Search…"
           role="combobox"
           aria-label="Search games by title"
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
-          className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-sm outline-none placeholder:text-muted focus:border-accent"
+          className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-sm outline-none placeholder:text-sm placeholder:text-muted focus:border-accent"
         />
         {showList && (
           <ul
             id={listId}
             role="listbox"
-            className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[70vh] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-xl shadow-black/40"
+            className="fixed inset-x-4 top-14 z-30 max-h-[70vh] sm:absolute sm:inset-x-0 sm:top-full sm:mt-1 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-xl shadow-black/40"
           >
             {hits.length === 0 && (
               <li className="px-3 py-2 text-sm text-muted">

@@ -61,7 +61,8 @@ export function Chat() {
 
   return (
     <div className="rounded-xl border border-border bg-surface">
-      <div className="max-h-[70vh] min-h-48 space-y-4 overflow-y-auto p-4">
+      {/* Phones scroll the page itself; a nested 70vh scroller squeezed the five results. */}
+      <div className="min-h-48 space-y-4 p-4 sm:max-h-[70vh] sm:overflow-y-auto">
         {turns.length === 0 && (
           <div className="space-y-3">
             <p className="text-sm text-muted">Try one of these, or describe it your own way:</p>

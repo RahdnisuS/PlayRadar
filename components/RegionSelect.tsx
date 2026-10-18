@@ -9,10 +9,17 @@ export function RegionSelect() {
   const router = useRouter();
   const [region, setRegion] = useState<RegionCode>(DEFAULT_REGION);
   const [saving, setSaving] = useState(false);
+  // Phones get "IN ₹"-style labels: the select is 16px there (no iOS zoom), and full names overflow the header.
+  const [narrow, setNarrow] = useState(false);
 
   useEffect(() => {
     const m = document.cookie.match(new RegExp(`(?:^|; )${REGION_COOKIE}=([A-Z]{2})`));
     if (m && isRegion(m[1])) setRegion(m[1]);
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setNarrow(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
   }, []);
 
   async function change(next: RegionCode) {
@@ -46,7 +53,7 @@ export function RegionSelect() {
       >
         {REGIONS.map((r) => (
           <option key={r.code} value={r.code}>
-            {r.label}
+            {narrow ? r.short : r.label}
           </option>
         ))}
       </select>

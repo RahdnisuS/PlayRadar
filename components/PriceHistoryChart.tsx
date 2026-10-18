@@ -31,6 +31,17 @@ function toRows(points: HistoryPoint[], current: Partial<Record<ShopCode, number
   return { rows, shops };
 }
 
+/** End-of-line label offsets: when the stores end at about the same price, push the labels apart instead of overlapping. */
+function endLabelOffsets(last: Row | undefined, shops: ShopCode[]): Partial<Record<ShopCode, number>> {
+  const dy: Partial<Record<ShopCode, number>> = Object.fromEntries(shops.map((s) => [s, 4]));
+  const vals = shops.map((s) => last?.[s]);
+  if (shops.length !== 2 || vals.some((v) => v == null)) return dy;
+  const [a, b] = vals as number[];
+  if (Math.abs(a - b) > 0.12 * Math.max(a, b, 1)) return dy;
+  const [hi, lo] = a >= b ? shops : [shops[1], shops[0]];
+  return { [hi]: -3, [lo]: 11 };
+}
+
 const month = (t: number) => new Date(t).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
 const day = (t: number) => new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
@@ -46,6 +57,7 @@ export default function PriceHistoryChart({
   const { rows, shops } = toRows(points, current);
   const fmt = (c: number) => (c === 0 ? "Free" : formatPrice(c, currency));
   const lastIndex = rows.length - 1;
+  const labelDy = endLabelOffsets(rows[lastIndex], shops);
 
   return (
     <figure className="space-y-2">
@@ -106,7 +118,7 @@ export default function PriceHistoryChart({
                   shops.length > 1
                     ? ({ index, x, y }: { index?: number; x?: number | string; y?: number | string }) =>
                         index === lastIndex ? (
-                          <text key={s} x={Number(x) + 6} y={Number(y)} dy={4} fontSize={11} fill="#e8ebf2">
+                          <text key={s} x={Number(x) + 6} y={Number(y)} dy={labelDy[s]} fontSize={11} fill="#e8ebf2">
                             {SERIES[s].label}
                           </text>
                         ) : (

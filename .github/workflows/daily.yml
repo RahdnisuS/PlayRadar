@@ -1,5 +1,5 @@
 name: Daily catalog refresh
-# 21:30 UTC (03:00 India): whole-catalog prices in all regions, release dates, then "instant" alerts.
+# 21:30 UTC (03:00 India): whole-catalog prices in all regions, release dates, "instant" alerts, then housekeeping.
 on:
   schedule:
     - cron: "30 21 * * *"
@@ -33,4 +33,6 @@ jobs:
       - run: npx tsx scripts/jobs/refresh-releases.ts
         if: ${{ !cancelled() }}
       - run: npx tsx scripts/jobs/alerts.ts
+        if: ${{ !cancelled() }}
+      - run: npx tsx scripts/jobs/housekeeping.ts
         if: ${{ !cancelled() }}
