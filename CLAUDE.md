@@ -182,7 +182,7 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only) and `NEXT_PUBLIC_SIT
 2. **Day 12: done and pushed 2026-10-17** (see **Epic free games** below). The `GROQ_API_KEY` repo secret is added. Verified 2026-10-18: `free_game_alerts` turned on for the user's account, `epic-free.ts` + `alerts.ts` run locally queued 2 alerts and sent one combined email ("Free on Epic: Bad Cheese, Agent A…"), Brevo status delivered. The user's `email_digest` is `off` (left from the unsubscribe test). Still to check: the first scheduled `epic-free.yml` run (16:40 UTC 2026-10-18) is green, including the mood-tags and embed-catalog steps.
 3. **Day 13:**
    - 50-game hand-labelled video set (`video_eval_labels`; the user judges the videos);
-   - a `/metrics` page + `sql/report.sql` (CTR, LLM vs fallback, cache hits, video accuracy);
+   - ~~a `/metrics` page + `sql/report.sql`~~ done 2026-10-18: public `/metrics` (footer link, `lib/metrics.ts`, counts only) and `sql/report.sql` (same numbers, for the SQL editor). Migration `20261018000001_turn_source.sql` added `chat_messages.source` (`llm` / `fallback` / `cache_exact` / `cache_similar` / `similar`; NULL = older fallback-or-cache turns). CTR = shown games with a video play, "looks good", wishlist or store click. Video accuracy reads `video_eval_labels` and shows "not done yet" until labelled;
    - responsive polish;
    - fuller privacy/terms pages.
 4. **Day 14:** README with screenshots and results; buffer.

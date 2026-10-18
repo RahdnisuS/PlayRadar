@@ -41,6 +41,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <p>
               Game data from <a className="underline" href="https://www.igdb.com">IGDB</a>. Prices from{" "}
               <a className="underline" href="https://isthereanydeal.com">IsThereAnyDeal</a>. Videos from YouTube.{" "}
+              <Link className="underline" href="/metrics">Metrics</Link> ·{" "}
               <Link className="underline" href="/privacy">Privacy</Link> ·{" "}
               <Link className="underline" href="/terms">Terms</Link>
             </p>

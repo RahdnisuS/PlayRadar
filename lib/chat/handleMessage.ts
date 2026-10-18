@@ -72,13 +72,16 @@ async function sessionExclusions(sessionId: string): Promise<string[]> {
   return rows.map((r) => String(r.game_id));
 }
 
+/** Where a turn's filters came from (chat_messages.source, shown on /metrics). */
+type TurnSource = "llm" | "fallback" | "cache_exact" | "cache_similar" | "similar";
+
 async function persistTurn(
-  sessionId: string, userText: string, filters: Filters, usedLlm: boolean, reply: string, games: ResultGame[], reasons: Record<string, string>,
+  sessionId: string, userText: string, filters: Filters, source: TurnSource, reply: string, games: ResultGame[], reasons: Record<string, string>,
 ) {
   await q(
-    `INSERT INTO chat_messages (session_id, role, content, extracted_filters, used_llm) VALUES
-       ($1, 'user', $2, $3, $4), ($1, 'assistant', $5, NULL, $4)`,
-    [sessionId, userText, JSON.stringify(filters), usedLlm, reply],
+    `INSERT INTO chat_messages (session_id, role, content, extracted_filters, used_llm, source) VALUES
+       ($1, 'user', $2, $3, $4, $6), ($1, 'assistant', $5, NULL, $4, $6)`,
+    [sessionId, userText, JSON.stringify(filters), source === "llm", reply, source],
   );
   const recIds = await q<{ id: string; game_id: string }>(
     `INSERT INTO recommendations (session_id, game_id, rank, match_score, reason)
@@ -143,7 +146,7 @@ export async function handleSimilar(opts: { who: Identity; country: string; sess
   }
   templated(games, reasons);
   const reply = games.length ? `More like ${src.title}:` : `I couldn't find more games like ${src.title} with your current filters.`;
-  const results = await persistTurn(sessionId, `More like ${src.title}`, prev, false, reply, games, reasons);
+  const results = await persistTurn(sessionId, `More like ${src.title}`, prev, "similar", reply, games, reasons);
   return { sessionId, reply, usedLlm: false, cache: null, results };
 }
 
@@ -249,6 +252,6 @@ export async function handleMessage(opts: {
       (relaxed ? ` Not enough exact matches, so I ${relaxed}.` : "")
     : `I couldn't find anything in our catalog for that${summary ? ` (${summary})` : ""}. Try a bigger budget or fewer requirements.`;
 
-  const results = await persistTurn(String(sessionId), message, filters, usedLlm, reply, games, reasons);
+  const results = await persistTurn(String(sessionId), message, filters, usedLlm ? "llm" : cache ? `cache_${cache}` : "fallback", reply, games, reasons);
   return { sessionId: String(sessionId), reply, usedLlm, cache, results };
 }
