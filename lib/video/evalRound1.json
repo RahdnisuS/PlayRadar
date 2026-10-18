@@ -1,0 +1,70 @@
+{
+  "note": "Video eval round 1 (2026-10-18), before tuning rules on this set",
+  "labelled": 50,
+  "correct": 41,
+  "misses": [
+    {
+      "title": "Caves of Qud",
+      "video": "Caves of Qud - (Nintendo Switch 1) - Framerate & Gameplay - 4K",
+      "kind": "gameplay_overview",
+      "classified_by": "llm",
+      "reason": "Not gameplay"
+    },
+    {
+      "title": "Rivals of Aether II",
+      "video": "Rivals 2 Gameplay - BioBirb (Wrastor) vs Trace (Ranno) Riptide 2023 Demo",
+      "kind": "gameplay_trailer",
+      "classified_by": "rules",
+      "reason": "Not gameplay"
+    },
+    {
+      "title": "Pax Dei",
+      "video": "Pax Dei   The best solo farm for massive Gold / XP / Enchantments",
+      "kind": "gameplay_overview",
+      "classified_by": "rules",
+      "reason": "Spoilers"
+    },
+    {
+      "title": "Tenebyss",
+      "video": null,
+      "kind": null,
+      "classified_by": null,
+      "reason": "No video found"
+    },
+    {
+      "title": "Tekken 7",
+      "video": "Claudio Overview - Tekken 7 [4K]",
+      "kind": "gameplay_overview",
+      "classified_by": "llm",
+      "reason": "Not gameplay"
+    },
+    {
+      "title": "100 Ninja Cats",
+      "video": "100 Ninja Cats Gameplay (Steam New Releases)",
+      "kind": "gameplay_overview",
+      "classified_by": "llm",
+      "reason": "Not gameplay"
+    },
+    {
+      "title": "Gestalt: Steam & Cinder",
+      "video": "Gestalt Steam & Cinder - UM RPG METROIDVANIA DIFERENCIADO! É UM BOM JOGO OU DECEPÇÃO? Análise/Review",
+      "kind": "gameplay_overview",
+      "classified_by": "llm",
+      "reason": "Poor quality"
+    },
+    {
+      "title": "Thomas Was Alone",
+      "video": null,
+      "kind": null,
+      "classified_by": null,
+      "reason": "No video found"
+    },
+    {
+      "title": "Pony Island",
+      "video": "Pony Island ll playthrough ll no commentary gameplay",
+      "kind": "gameplay_trailer",
+      "classified_by": "rules",
+      "reason": "Spoilers"
+    }
+  ]
+}

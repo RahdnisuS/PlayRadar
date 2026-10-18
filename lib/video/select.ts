@@ -4,7 +4,7 @@
 import { q } from "../db";
 import { groqJson } from "../llm/groq";
 import { tryConsume } from "../llm/caps";
-import { ACCEPT, BORDERLINE, judgeOverview, pickTrailer, type Candidate } from "./rules";
+import { ACCEPT, BORDERLINE, judgeOverview, rankTrailers, trailerReject, type Candidate } from "./rules";
 import { QuotaExhaustedError, searchVideoIds, videoDetails } from "./youtube";
 
 export type SelectedVideo = { id: string; youtubeId: string; kind: string; title: string | null; channel: string | null };
@@ -39,8 +39,9 @@ async function llmSaysOverview(c: Candidate, gameTitle: string): Promise<boolean
             "Decide if a YouTube video is a spoiler-free gameplay overview of a specific game, suitable for someone " +
             "deciding whether to buy it: it shows what the game is and how it plays. Say no to playthroughs, story " +
             "recaps, endings, boss fights, mod showcases, personal challenges or experiments (\"I played X for 100 " +
-            "hours\"), pro/competitive play, tournaments, tips and guides, montages, and videos about a different " +
-            'game. Respond with JSON {"ok": true|false}.',
+            "hours\"), pro/competitive play, tournaments, tips and guides (farming, builds), montages, framerate or " +
+            "performance tests, overviews of a single character, map or mode, roundups of several games, videos " +
+            "not in English, and videos about a different game. Respond with JSON {\"ok\": true|false}.",
         },
         {
           role: "user",
@@ -84,12 +85,17 @@ async function save(
 }
 
 async function selectTrailer(game: GameRow): Promise<boolean> {
-  const pick = pickTrailer(game.external_ids.igdb_videos ?? []);
-  if (!pick) return false;
-  const [c] = await videoDetails([pick.id]);
-  if (!c?.embeddable) return false;
-  await save(game.id, c, pick.kind, "rules", 5, 0.05, true);
-  return true;
+  const ranked = rankTrailers(game.external_ids.igdb_videos ?? []).slice(0, 50);
+  if (!ranked.length) return false;
+  // One videos.list call (1 unit) for all candidates; take the best-ranked one whose real title and length pass.
+  const details = new Map((await videoDetails(ranked.map((r) => r.id))).map((c) => [c.youtubeId, c]));
+  for (const pick of ranked) {
+    const c = details.get(pick.id);
+    if (!c || trailerReject(c, game.title)) continue;
+    await save(game.id, c, pick.kind, "rules", 5, 0.05, true);
+    return true;
+  }
+  return false;
 }
 
 async function selectOverview(game: GameRow): Promise<boolean> {
