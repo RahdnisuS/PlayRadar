@@ -62,40 +62,77 @@ async function insertSnapshotIfChanged(listingId: string, country: string, p: { 
   return rows[0]?.id ?? null;
 }
 
-/** Recomputes the summary from snapshots (sale count = number of times a discount started in the last 12 months). */
-async function refreshSummary(listingId: string, country: string, current: PriceQuote | null, storeLowCents: number | null) {
+type Priced = { listingId: string; quote: PriceQuote };
+
+// The batch versions below take one round trip per batch instead of one per listing: the daily job runs on a US
+// runner against the Mumbai DB, where ~10k listings x 3 queries took almost two hours.
+
+/** Batch form of insertSnapshotIfChanged for current prices (captured now). Returns the new snapshot ids. */
+async function insertSnapshotsIfChanged(rows: Priced[], country: string) {
+  if (!rows.length) return [];
+  return q<{ id: string; listing_id: string }>(
+    `INSERT INTO price_snapshots (listing_id, country_code, currency, price_cents, regular_cents, sale_ends_at)
+     SELECT n.listing_id, $2, n.currency, n.price_cents, n.regular_cents, n.sale_ends_at
+     FROM unnest($1::bigint[], $3::text[], $4::int[], $5::int[], $6::timestamptz[])
+          AS n(listing_id, currency, price_cents, regular_cents, sale_ends_at)
+     WHERE NOT EXISTS (
+       SELECT 1 FROM (
+         SELECT price_cents, regular_cents FROM price_snapshots
+         WHERE listing_id = n.listing_id AND country_code = $2
+         ORDER BY captured_at DESC LIMIT 1
+       ) last WHERE last.price_cents = n.price_cents AND last.regular_cents = n.regular_cents
+     )
+     RETURNING id, listing_id`,
+    [
+      rows.map((r) => r.listingId),
+      country,
+      rows.map((r) => r.quote.currency),
+      rows.map((r) => r.quote.priceCents),
+      rows.map((r) => r.quote.regularCents),
+      rows.map((r) => r.quote.saleEndsAt ?? null),
+    ],
+  );
+}
+
+/** Recomputes summaries from snapshots (sale count = number of times a discount started in the last 12 months). */
+async function refreshSummaries(rows: Priced[], country: string) {
+  if (!rows.length) return;
   await q(
-    `WITH s AS (
-       SELECT price_cents, regular_cents, discount_pct, captured_at,
-              LAG(discount_pct) OVER (ORDER BY captured_at) AS prev_pct
-       FROM price_snapshots WHERE listing_id = $1 AND country_code = $2
+    `WITH n AS (
+       SELECT * FROM unnest($1::bigint[], $3::int[], $4::int[]) AS n(listing_id, current_cents, store_low)
+     ), s AS (
+       SELECT listing_id, price_cents, discount_pct, captured_at,
+              LAG(discount_pct) OVER (PARTITION BY listing_id ORDER BY captured_at) AS prev_pct
+       FROM price_snapshots WHERE country_code = $2 AND listing_id = ANY($1::bigint[])
      ), agg AS (
-       SELECT MIN(price_cents) AS low, MIN(captured_at) AS since,
+       SELECT listing_id, MIN(price_cents) AS low, MIN(captured_at) AS since,
               COUNT(*) FILTER (WHERE discount_pct > 0 AND COALESCE(prev_pct, 0) = 0
                                AND captured_at > now() - interval '12 months') AS sales
-       FROM s
+       FROM s GROUP BY listing_id
      ), low_at AS (
-       SELECT captured_at FROM s ORDER BY price_cents, captured_at DESC LIMIT 1
+       SELECT DISTINCT ON (listing_id) listing_id, captured_at FROM s ORDER BY listing_id, price_cents, captured_at DESC
      ), latest AS (
-       SELECT price_cents FROM s ORDER BY captured_at DESC LIMIT 1
+       SELECT DISTINCT ON (listing_id) listing_id, price_cents FROM s ORDER BY listing_id, captured_at DESC
      )
      INSERT INTO price_summary (listing_id, country_code, current_cents, lowest_cents, lowest_at, sale_count_12m, tracking_since, updated_at)
-     SELECT $1, $2, COALESCE($3, latest.price_cents),
-            LEAST(agg.low, COALESCE($4, agg.low)), low_at.captured_at, agg.sales, agg.since, now()
-     FROM agg, latest, low_at
+     SELECT n.listing_id, $2, COALESCE(n.current_cents, latest.price_cents),
+            LEAST(agg.low, COALESCE(n.store_low, agg.low)), low_at.captured_at, agg.sales, agg.since, now()
+     FROM n JOIN agg USING (listing_id) JOIN latest USING (listing_id) JOIN low_at USING (listing_id)
      ON CONFLICT (listing_id, country_code) DO UPDATE SET
        current_cents = EXCLUDED.current_cents, lowest_cents = EXCLUDED.lowest_cents, lowest_at = EXCLUDED.lowest_at,
        sale_count_12m = EXCLUDED.sale_count_12m,
        tracking_since = LEAST(price_summary.tracking_since, EXCLUDED.tracking_since), updated_at = now()`,
-    [listingId, country, current?.priceCents ?? null, storeLowCents],
+    [rows.map((r) => r.listingId), country, rows.map((r) => r.quote.priceCents), rows.map((r) => r.quote.storeLowCents)],
   );
 }
 
-async function markFetched(listingId: string, country: string, status: "ok" | "error" | "not_listed") {
+async function markFetched(listingIds: string[], country: string, status: "ok" | "error" | "not_listed") {
+  if (!listingIds.length) return;
   await q(
-    `INSERT INTO price_fetch_state (listing_id, country_code, last_fetched_at, last_status) VALUES ($1, $2, now(), $3)
+    `INSERT INTO price_fetch_state (listing_id, country_code, last_fetched_at, last_status)
+     SELECT id, $2, now(), $3 FROM unnest($1::bigint[]) AS id
      ON CONFLICT (listing_id, country_code) DO UPDATE SET last_fetched_at = now(), last_status = EXCLUDED.last_status`,
-    [listingId, country, status],
+    [listingIds, country, status],
   );
 }
 
@@ -141,18 +178,18 @@ export async function refreshPrices(gameIds: (string | number)[], country: strin
   const quotes = itadIds.length ? await provider.getPrices(itadIds, country) : [];
   const primary = (l: Listing) => quotes.find((x) => x.providerGameId === l.itad_id && x.shop === l.shop) ?? null;
   const fallback = await steamFallbackQuotes(listings.filter((l) => l.shop === "steam" && !primary(l)), country);
-  const changed: RefreshResult["changed"] = [];
+  const priced: Priced[] = [];
+  const unlisted: string[] = [];
   for (const l of listings) {
     const quote = primary(l) ?? fallback.get(l.listing_id) ?? null;
-    if (!quote) {
-      await markFetched(l.listing_id, country, "not_listed");
-      continue;
-    }
-    const snapshotId = await insertSnapshotIfChanged(l.listing_id, country, quote);
-    if (snapshotId) changed.push({ listingId: l.listing_id, snapshotId });
-    await refreshSummary(l.listing_id, country, quote, quote.storeLowCents);
-    await markFetched(l.listing_id, country, "ok");
+    if (quote) priced.push({ listingId: l.listing_id, quote });
+    else unlisted.push(l.listing_id);
   }
+  const changed: RefreshResult["changed"] = (await insertSnapshotsIfChanged(priced, country))
+    .map((r) => ({ listingId: r.listing_id, snapshotId: r.id }));
+  await refreshSummaries(priced, country);
+  await markFetched(priced.map((p) => p.listingId), country, "ok");
+  await markFetched(unlisted, country, "not_listed");
   if (backfilled.length) {
     await q(
       `UPDATE price_summary SET history_backfilled_at = now() WHERE country_code = $2 AND listing_id = ANY($1::bigint[])`,
