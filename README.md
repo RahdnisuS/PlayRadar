@@ -65,7 +65,7 @@ flowchart LR
 | Round | Correct | Notes |
 |---|---|---|
 | 1, before any tuning | **41 / 50 (82%)** | 41/48 (85%) of the games that got a video. All 14 official trailers were right |
-| 2, after tuning on these misses | _pending_ | Labelling of the 7 re-selected videos in progress |
+| 2, after tuning on these misses | **47 / 50 (94%)** | All 47 videos shown were good. The 3 misses are games left with no video rather than a wrong one |
 
 Round 1 broken down by how the video was chosen:
 
@@ -84,7 +84,7 @@ What the misses taught us, and what changed (each is now an offline test case in
 - **One miss slipped past the rules**: a gold-farming guide. Guides, builds and benchmarks are now rejected.
 - **The new rules were simulated on all stored videos before shipping.** None of the 41 good videos would be rejected, and the simulation found a full 11-hour walkthrough on a popular game outside the eval set.
 
-Round 1 is kept in [`lib/video/evalRound1.json`](lib/video/evalRound1.json). Round 2 is measured on the same 50 games the rules were tuned on, so it is an optimistic number. Round 1 is the honest one.
+Round 1 is kept in [`lib/video/evalRound1.json`](lib/video/evalRound1.json). Round 2 is measured on the same 50 games the rules were tuned on, so it is an optimistic number. Round 1 is the honest one. Round 2 does show the trade-off the changes make: when no video passes, PlayRadar now shows nothing instead of a doubtful video.
 
 **Catalog and data** (October 2026): 1,995 games (293 upcoming) with 1,983 Steam and 692 Epic listings. 1,644 games have a current price, and 10,000+ price snapshots are stored across the four regions. 95 tags, including LLM-generated moods and sub-genres players search for (Soulslike, Metroidvania, Roguelike…).
 
