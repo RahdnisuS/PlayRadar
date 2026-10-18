@@ -26,7 +26,16 @@ export async function extractFilters(
     { role: "system", content: system },
     { role: "user", content: user },
   ], { maxTokens: 600, timeoutMs: 10000 });
-  const parsed = FiltersSchema.safeParse(data);
-  if (!parsed.success) throw new Error("filters JSON did not match schema");
+  // The model sometimes writes null for keys it should omit ("max_playtime_hrs": null); treat that as omitted,
+  // otherwise about 1 turn in 7 failed validation and fell back to the keyword parser.
+  const cleaned =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? Object.fromEntries(Object.entries(data).filter(([, v]) => v !== null))
+      : data;
+  const parsed = FiltersSchema.safeParse(cleaned);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+    throw new Error(`filters JSON did not match schema (${issues}): ${JSON.stringify(data).slice(0, 300)}`);
+  }
   return parsed.data;
 }
