@@ -52,6 +52,8 @@ export function releaseStatus(g: IgdbGame): "released" | "early_access" | "upcom
   return !g.first_release_date || g.first_release_date > Date.now() / 1000 ? "upcoming" : "released";
 }
 
+export const MAX_PLAYTIME_HRS = 200;
+
 export async function fetchPlaytimes(ids: number[]): Promise<Map<number, number>> {
   const out = new Map<number, number>();
   for (let i = 0; i < ids.length; i += 500) {
@@ -60,7 +62,8 @@ export async function fetchPlaytimes(ids: number[]): Promise<Map<number, number>
       `fields game_id,normally,hastily; where game_id = (${ids.slice(i, i + 500)}); limit 500;`);
     for (const r of rows) {
       const secs = r.hastily ?? r.normally;
-      if (secs) out.set(r.game_id, Math.round((secs / 3600) * 10) / 10);
+      // IGDB's times are community-submitted; live-service games get values like 51,000 h. No main story is that long.
+      if (secs && secs <= MAX_PLAYTIME_HRS * 3600) out.set(r.game_id, Math.round((secs / 3600) * 10) / 10);
     }
   }
   return out;

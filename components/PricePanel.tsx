@@ -66,7 +66,8 @@ export function PricePanel({ gameId, onStoreClick }: { gameId: string; onStoreCl
 
       {data.hint && <p className={`rounded-lg border px-3 py-2 text-sm ${HINT_STYLE[data.hint.verdict]}`}>{data.hint.text}</p>}
 
-      {data.history.length > 0 && currency && (
+      {/* A game that was free all year has nothing to chart (a flat "Free" line on a ₹0.04 axis). */}
+      {data.history.some((h) => h.priceCents > 0) && currency && (
         <section className="space-y-1">
           <h3 className="text-sm font-medium">Price history, last 12 months</h3>
           <PriceHistoryChart points={data.history} current={current} currency={currency} />
