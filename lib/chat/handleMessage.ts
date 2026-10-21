@@ -6,8 +6,8 @@ import { explainResults } from "../llm/explain";
 import { tryConsume, type Identity } from "../llm/caps";
 import { LlmUnavailableError } from "../llm/groq";
 import { embedQuery, toPgVector } from "../search/embed";
-import { parseFallback } from "../search/fallbackParser";
-import { FiltersSchema, sanitize, tagVocabulary, withDefaults, CURRENCY_BY_COUNTRY, type Filters } from "../search/filters";
+import { parseFallback, sameConstraints } from "../search/fallbackParser";
+import { FiltersSchema, guardInventedLimits, sanitize, tagVocabulary, withDefaults, CURRENCY_BY_COUNTRY, type Filters } from "../search/filters";
 import { retrieve, type ResultGame } from "../search/retrieve";
 import { templateReason } from "../search/templates";
 import { formatPrice } from "../format";
@@ -181,13 +181,14 @@ export async function handleMessage(opts: {
 
   const messageEmb = await embedQuery(message);
   if (!filters && !prev && messageEmb) {
-    const [similar] = await q<{ filters: unknown; reasons: Record<string, string> | null }>(
-      `SELECT filters, reasons FROM chat_cache
+    const candidates = await q<{ filters: unknown; reasons: Record<string, string> | null; normalized_text: string | null }>(
+      `SELECT filters, reasons, normalized_text FROM chat_cache
        WHERE country_code = $2 AND expires_at > now() AND query_embedding IS NOT NULL
          AND 1 - (query_embedding <=> $1::vector) >= $3
-       ORDER BY query_embedding <=> $1::vector LIMIT 1`,
+       ORDER BY query_embedding <=> $1::vector LIMIT 3`,
       [toPgVector(messageEmb), country, SIMILAR_CACHE_THRESHOLD],
     );
+    const similar = candidates.find((c) => c.normalized_text && sameConstraints(normalize(message), c.normalized_text, country));
     if (similar) {
       filters = FiltersSchema.parse(similar.filters);
       cachedReasons = similar.reasons ?? {};
@@ -200,7 +201,8 @@ export async function handleMessage(opts: {
   if (!filters) {
     if (await tryConsume("filters", who, ip)) {
       try {
-        filters = sanitize(await extractFilters(message, prev, country, vocab), vocabNames);
+        const extracted = sanitize(await extractFilters(message, prev, country, vocab), vocabNames);
+        filters = guardInventedLimits(extracted, message, prev, parseFallback(message, country, prev ?? undefined));
         usedLlm = true;
       } catch (e) {
         // Groq down, rate-limited or returned bad JSON: answer with the keyword parser instead.

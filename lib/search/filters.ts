@@ -33,6 +33,38 @@ export function sanitize(f: Filters, vocab: string[]): Filters {
   return { ...f, tags_any: fix(f.tags_any), tags_exclude: fix(f.tags_exclude), exclude_ids: undefined };
 }
 
+/** Does the message itself ask for free games? ("in my free time" doesn't.) */
+export function mentionsFree(message: string): boolean {
+  return /\bf2p\b|\bfree\b(?! time)|\bno cost\b|\bcosts? nothing\b|\bzero cost\b/.test(message.toLowerCase());
+}
+
+/** Does the message talk about how long a game is? */
+export function mentionsLength(message: string): boolean {
+  return /\d\s*(?:h\b|hrs?\b|hours?)|\bshort|\bquick|\bweekend\b|\bsitting\b|\bbite[- ]sized\b|\bfinish|\blong|\blength\b|\bplaytime\b|\bendless\b|\bmassive\b|\bhuge\b|\bevening\b|\bafternoon\b/.test(
+    message.toLowerCase(),
+  );
+}
+
+/**
+ * The LLM sometimes invents limits nobody asked for: a 0 budget ("finish in a weekend" -> free), or "under 12h"
+ * on a plain "roguelike". Price is never relaxed by retrieve(), so a wrong 0 would drop the genre instead.
+ * Keep such a limit only when this message talks about it; otherwise fall back to the previous turn's value.
+ */
+export function guardInventedLimits(f: Filters, message: string, prev: Filters | null, keywords: Filters): Filters {
+  const out = { ...f };
+  // ...and the reverse: the LLM skipped a length the keyword rules did see ("short roguelike").
+  if (out.min_playtime_hrs === undefined && out.max_playtime_hrs === undefined) {
+    out.min_playtime_hrs = keywords.min_playtime_hrs;
+    out.max_playtime_hrs = keywords.max_playtime_hrs;
+  }
+  if (out.max_price_cents === 0 && !mentionsFree(message) && prev?.max_price_cents !== 0) out.max_price_cents = prev?.max_price_cents;
+  if (!mentionsLength(message)) {
+    out.min_playtime_hrs = prev?.min_playtime_hrs;
+    out.max_playtime_hrs = prev?.max_playtime_hrs;
+  }
+  return out;
+}
+
 let vocabCache: { at: number; tags: { name: string; kind: string }[] } | null = null;
 
 export async function tagVocabulary(): Promise<{ name: string; kind: string }[]> {

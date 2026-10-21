@@ -110,6 +110,21 @@ function tagsIn(text: string): string[] {
   return [...new Set(SYNONYMS.filter(([re]) => re.test(text)).flatMap(([, tags]) => tags))];
 }
 
+/**
+ * Guard for the similar-query cache: two wordings only share an answer when the keyword rules find the same
+ * constraints in both ("short roguelike" embeds close to "roguelike" but adds a playtime limit).
+ */
+export function sameConstraints(a: string, b: string, country: string): boolean {
+  const key = (m: string) => {
+    const f = parseFallback(m, country);
+    return JSON.stringify([
+      [...f.tags_any].sort(), [...f.tags_exclude].sort(), f.coop, f.multiplayer, f.single_player,
+      f.max_price_cents, f.min_playtime_hrs, f.max_playtime_hrs, f.release_status,
+    ]);
+  };
+  return key(a) === key(b);
+}
+
 export function parseFallback(message: string, country: string, previous?: Filters): Filters {
   const text = message.toLowerCase();
   const { positive, negative } = negativeChunks(text);
@@ -124,7 +139,7 @@ export function parseFallback(message: string, country: string, previous?: Filte
   };
   f.tags_any = f.tags_any.filter((t) => !f.tags_exclude.includes(t));
 
-  if (/\bco-?op\b|\bcooperative\b|\bwith (?:my )?(?:friends?|partner|girlfriend|boyfriend|wife|husband|brother|sister)\b|\btogether\b/.test(text)) f.coop = true;
+  if (/\bco[- ]?op\b|\bcooperative\b|\bwith (?:my )?(?:friends?|partner|girlfriend|boyfriend|wife|husband|brother|sister)\b|\btogether\b/.test(text)) f.coop = true;
   if (/\bmultiplayer\b|\bonline\b|\bpvp\b/.test(positive)) f.multiplayer = true;
   if (/\bsolo\b|\bsingle[- ]?player\b|\balone\b|\bby myself\b/.test(text)) {
     f.single_player = true;

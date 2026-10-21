@@ -20,6 +20,7 @@ export async function extractFilters(
     `coop, multiplayer, single_player (booleans), max_price_cents (integer, ${cur.code} minor units: ${cur.symbol}1 = 100; free = 0), ` +
     `min_playtime_hrs, max_playtime_hrs ("short" ~ max 12), release_status (array of released|upcoming|early_access; only if asked), ` +
     `query_text (one sentence restating what they want, for semantic search).\n` +
+    `Set max_price_cents only if the message mentions price or free, and playtime only if it mentions length ("short", "quick", "a weekend", hours, "long").\n` +
     `If previous filters are given and the message refines them, return the full updated filters; if it asks for something different, start fresh.`;
   const user = previous ? `Previous filters: ${JSON.stringify(previous)}\nMessage: ${message}` : `Message: ${message}`;
   const { data } = await groqJson<unknown>("filters", [
