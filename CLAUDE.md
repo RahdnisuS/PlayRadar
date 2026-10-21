@@ -222,6 +222,7 @@ Vercel now has `BREVO_API_KEY` (Sensitive, Production only), `NEXT_PUBLIC_SITE_U
 ## Working with this user
 
 - The user is new to dev tooling. For anything outside the terminal (dashboards, API keys), give numbered click-by-click steps, one service at a time, and say exactly which `.env.local` line to fill. Never ask them to paste secrets into chat. Check keys by length or by test calls, without printing them.
+- GitHub user **@playwithloki** was invited as a collaborator on 2026-10-21 (write access, so their pushes to `main` deploy too). They appear under Contributors only after their first commit. No branch protection is set up yet; ask the user before adding any.
 - Before every commit, scan the staged diff for the actual values in `.env.local` and for `postgresql://`. Commit messages are descriptive; pushing to `main` deploys to production.
 
 ## Product constraints that are easy to get wrong
